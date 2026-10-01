@@ -1,0 +1,21 @@
+{
+ "representation": {
+  "1m": {
+   "control_points": 261,
+   "rms_lateral_mm": 1.3492439410258759
+  },
+  "2m": {
+   "control_points": 131,
+   "rms_lateral_mm": 2.0577631449863194
+  },
+  "5m": {
+   "control_points": 52,
+   "rms_lateral_mm": 2.6690615351436593
+  },
+  "10m": {
+   "control_points": 26,
+   "rms_lateral_mm": 3.298774330370311
+  }
+ },
+ "f8_flagged_fraction_in_window": 1.0
+}

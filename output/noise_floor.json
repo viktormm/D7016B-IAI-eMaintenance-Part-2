@@ -1,0 +1,57 @@
+{
+ "code": "461f18528f0e",
+ "injection_test": {
+  "d_left": {
+   "detected_fraction": 0.807,
+   "false_alarm_fraction": 0.056,
+   "injected_mm": 4.0,
+   "recovered_mean_mm": 3.756
+  },
+  "gauge": {
+   "detected_fraction": 1.0,
+   "false_alarm_fraction": 0.054,
+   "injected_mm": 4.0,
+   "recovered_mean_mm": 3.933
+  },
+  "z_centre": {
+   "detected_fraction": 1.0,
+   "false_alarm_fraction": 0.043,
+   "injected_mm": 5.0,
+   "recovered_mean_mm": 5.058
+  }
+ },
+ "input": "gps_pointcloud_00.laz",
+ "input_sha256": "9135d3ecac26d675999f7ae1ef3e7630dc26f55e96e4901776ec62a8e51dc1d0",
+ "note": "change between two halves of the same scan: sampling noise of the pipeline, at half the point density; positioning error between real runs comes on top",
+ "reference": "032f505d2216",
+ "split_half": {
+  "d_centre": {
+   "p95_abs_mm": 2.674,
+   "rms_mm": 1.251
+  },
+  "d_left": {
+   "p95_abs_mm": 3.367,
+   "rms_mm": 1.469
+  },
+  "d_right": {
+   "p95_abs_mm": 3.071,
+   "rms_mm": 1.433
+  },
+  "gauge": {
+   "p95_abs_mm": 1.731,
+   "rms_mm": 0.941
+  },
+  "z_centre": {
+   "p95_abs_mm": 0.529,
+   "rms_mm": 0.272
+  },
+  "z_left": {
+   "p95_abs_mm": 0.798,
+   "rms_mm": 0.377
+  },
+  "z_right": {
+   "p95_abs_mm": 0.881,
+   "rms_mm": 0.42
+  }
+ }
+}

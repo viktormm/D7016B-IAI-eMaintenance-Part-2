@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track curve in 3D</title>
+<style>
+  :root { --bg:#f5f8f8; --card:#ffffff; --ink:#16262B; --muted:#5F7178; --teal:#028090; --line:#d5e1e3; --warm:#D9822B; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Calibri, "Segoe UI", system-ui, sans-serif; }
+  #app { display:grid; grid-template-columns:310px 1fr; height:100vh; }
+  #panel { background:var(--card); border-right:1px solid var(--line); padding:14px 16px 20px; overflow-y:auto; }
+  #plot { height:100vh; min-width:0; background:#fff; }
+  h1 { font-size:19px; margin:0 0 2px; }
+  h2 { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:16px 0 6px; }
+  .sub { color:var(--muted); font-size:12px; margin:0; overflow-wrap:anywhere; }
+  label { display:block; margin:6px 0; }
+  label.inline { display:flex; align-items:center; gap:6px; margin:4px 0; flex-wrap:wrap; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; }
+  output { color:var(--teal); font-weight:600; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; accent-color:var(--teal); margin:2px 0 0; }
+  input[type=number], select { font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:5px; background:#fff; color:var(--ink); }
+  input[type=number] { width:64px; }
+  select { width:100%; }
+  button { font:inherit; padding:4px 10px; border:1px solid var(--line); border-radius:5px; background:#fff; color:var(--ink); cursor:pointer; }
+  button:hover { border-color:var(--teal); color:var(--teal); }
+  button.on { background:var(--teal); border-color:var(--teal); color:#fff; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .seg { display:flex; gap:6px; }
+  .seg button { flex:1; }
+  table { width:100%; border-collapse:collapse; font-size:11.5px; margin-top:6px; font-variant-numeric:tabular-nums; }
+  th, td { text-align:right; padding:2px 4px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  .notes { color:var(--muted); font-size:12px; }
+  .notes p { margin:6px 0; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  @media (max-width: 800px) {
+    #app { grid-template-columns:1fr; grid-template-rows:auto 75vh; height:auto; }
+    #panel { border-right:0; border-bottom:1px solid var(--line); }
+    #plot { height:75vh; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <h1>Track curve in 3D</h1>
+    <p class="sub" id="prov"></p>
+
+    <h2>View</h2>
+    <div class="seg" id="frame">
+      <button data-v="track" title="Chainage along the track, sideways offset from the reference line, height as stored">Track frame</button>
+      <button data-v="world" title="E and N as in the LiDAR file, true horizontal scale">World (E, N)</button>
+    </div>
+    <label id="eyLabel"><span class="row"><span>Sideways exaggeration</span><output id="eyOut"></output></span>
+      <input type="range" id="ey" min="0" max="100" step="1"></label>
+    <label><span class="row"><span>Height exaggeration</span><output id="ezOut"></output></span>
+      <input type="range" id="ez" min="0" max="100" step="1"></label>
+    <label class="inline">Window <input type="number" id="lo" step="any"> to <input type="number" id="hi" step="any"> m
+      <button id="winAll" title="Show the whole run">All</button></label>
+    <div class="btns" id="cams">
+      <button data-v="persp">Perspective</button><button data-v="top">Top</button><button data-v="side">Side</button>
+    </div>
+
+    <h2>Show</h2>
+    <label class="inline"><input type="checkbox" id="rails"> Catmull-Rom curves (rails)</label>
+    <label class="inline"><input type="checkbox" id="ctrl"> Control points (1 m)</label>
+    <label class="inline"><input type="checkbox" id="centre"> Centreline (red)</label>
+    <label class="inline"><input type="checkbox" id="links"> Cross-links every 5 m</label>
+    <label class="inline" id="cloudLabel"><input type="checkbox" id="cloud"> Point cloud sample</label>
+
+    <h2>Colour the rails by</h2>
+    <select id="colour"></select>
+
+    <h2>Cursor along the track</h2>
+    <div class="row"><span>Chainage</span><output id="cursOut"></output></div>
+    <input type="range" id="cursor" step="0.1">
+    <table id="readout"></table>
+    <p class="notes" style="margin:4px 0 0">d and Z in metres; L = left rail, R = right rail.</p>
+
+    <h2>Notes</h2>
+    <div class="notes">
+      <p>Drag to rotate, scroll to zoom, right-drag to pan. The camera icon above the plot saves a PNG. Click a legend entry to hide it.</p>
+      <p><b>Track frame:</b> chainage <i>s</i> along the reference line, sideways offset <i>d</i> from it (left = +), and height <i>Z</i> as stored in the LiDAR file. The rails are 1.43 m apart in a track hundreds of metres long, so sideways and height are stretched; ×1 is true scale. Narrowing the window or hiding the point cloud keeps the shape of the box.</p>
+      <p><b>World:</b> E and N as in the file with the origin subtracted (see the axis titles), true horizontal scale; only height is stretched.</p>
+      <p>Lines are the Catmull-Rom curve through the control points (circles); the red line is the centreline, midway between the rails. The purple bar is the cursor. <i>Z</i> is relative to the sensor, so the LiDAR track's own rails stay nearly flat.</p>
+    </div>
+  </div>
+  <div id="plot"></div>
+</div>
+
+<script>/*PLOTLY*/</script>
+<script>
+const D = /*DATA*/null;
+const el = id => document.getElementById(id);
+const plotDiv = el('plot');
+const LINK = 5;                                   // cross-link spacing (m)
+const GAUGE_SCALE = [[0, '#1f5fae'], [0.5, '#7c9299'], [1, '#e8a317']];   // narrow, median, wide (no red: that is the centreline)
+const CENTRE_RED = '#e3000f';
+const CAMS = {
+  persp: {eye: {x: -0.5, y: -0.95, z: 0.5}, up: {x: 0, y: 0, z: 1}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
+  top:   {eye: {x: 0, y: 0, z: 1.0},       up: {x: 0, y: 1, z: 0}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
+  side:  {eye: {x: 0, y: -1.0, z: 0},      up: {x: 0, y: 0, z: 1}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
+};
+const SHAPE = {y: 0.28, z: 0.06};                 // the box at first: sideways and height as a fraction of its length
+const S = {frame: 'track', colour: D.runs.length > 1 ? 'run' : 'gauge', ey: 1, ez: 1, cam: 'persp',
+           lo: D.ranges.s[0], hi: D.ranges.s[1], cursor: Math.round((D.ranges.s[0] + D.ranges.s[1]) / 2),
+           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0};
+const H = {};                                     // settings from the address, e.g. #frame=world&lo=140&hi=170
+(location.hash || '').slice(1).split('&').forEach(kv => {
+  const [k, v] = kv.split('=');
+  if (k in S && v !== undefined) H[k] = typeof S[k] === 'number' ? +v : decodeURIComponent(v);
+});
+['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud'].forEach(k => { if (k in H) S[k] = H[k]; });
+if (!D.points) S.cloud = 0;
+
+// ---- helpers -------------------------------------------------------------------------------------------------------
+const inWin = s => s != null && s >= S.lo - 1e-9 && s <= S.hi + 1e-9;
+const masked = (a, s) => a.map((v, i) => inWin(s[i]) ? v : null);
+const mean2 = (a, b) => a.map((v, i) => v == null || b[i] == null ? null : (v + b[i]) / 2);
+const span = r => r[1] - r[0];
+const fmt = (v, n) => v == null ? '–' : v.toFixed(n);
+function xyz(g, side) {       // one rail (L, R) or the centreline (C) of a curve object, in the current frame
+  const pick = k => side === 'C' ? mean2(g[k + 'L'], g[k + 'R']) : g[k + side];
+  const a = S.frame === 'track' ? [g.s, pick('d'), pick('z')] : [pick('E'), pick('N'), pick('z')];
+  return a.map(v => masked(v, g.s));
+}
+const nearest = (r, s) => Math.max(0, Math.min(r.dense.s.length - 1, Math.round((s - r.dense.s[0]) / D.step)));
+
+// ---- traces --------------------------------------------------------------------------------------------------------
+function railTrace(r, ri, side) {
+  const g = r.dense, [x, y, z] = xyz(g, side), left = side === 'L';
+  const label = r.id + (left ? ' left' : ' right');
+  const line = {width: 7};
+  if (S.colour === 'gauge') {
+    Object.assign(line, {color: g.gauge, colorscale: GAUGE_SCALE, cmin: D.gauge_range[0], cmax: D.gauge_range[1],
+      showscale: ri === 0 && left, colorbar: {title: {text: 'gauge (mm)'}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
+  } else if (S.colour === 'chainage') {
+    Object.assign(line, {color: g.s, colorscale: 'Viridis', cmin: D.ranges.s[0], cmax: D.ranges.s[1],
+      showscale: ri === 0 && left, colorbar: {title: {text: 'chainage s (m)'}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
+  } else {
+    line.color = r.colour;
+  }
+  return {type: 'scatter3d', mode: 'lines', name: r.id + ' curves', legendgroup: r.id + '-rails', showlegend: left,
+    x, y, z, line, customdata: g.s.map((s, i) => [s, g.gauge[i], g['d' + side][i], g['z' + side][i]]),
+    hovertemplate: 's %{customdata[0]:.1f} m<br>gauge %{customdata[1]:.1f} mm<br>d %{customdata[2]:.4f} m<br>Z %{customdata[3]:.4f} m<extra>' + label + '</extra>'};
+}
+function ctrlTrace(r, side) {
+  const g = r.ctrl, [x, y, z] = xyz(g, side), left = side === 'L';
+  return {type: 'scatter3d', mode: 'markers', name: r.id + ' control points', legendgroup: r.id + '-ctrl', showlegend: left,
+    x, y, z, marker: {size: 2.4, color: '#ffffff', opacity: 1, line: {color: r.colour, width: 1.2}},
+    customdata: g.s.map((s, i) => [s, g.gauge[i]]),
+    hovertemplate: 'control point<br>s %{customdata[0]:.0f} m<br>gauge %{customdata[1]:.1f} mm<extra>' + r.id + (left ? ' left' : ' right') + '</extra>'};
+}
+function centreTrace(r) {
+  const [x, y, z] = xyz(r.dense, 'C');
+  return {type: 'scatter3d', mode: 'lines', name: r.id + ' centreline', legendgroup: r.id + '-centre', x, y, z,
+    line: {color: CENTRE_RED, width: 9}, hoverinfo: 'skip'};
+}
+function linkTrace(r) {
+  const g = r.dense, [xl, yl, zl] = xyz(g, 'L'), [xr, yr, zr] = xyz(g, 'R'), x = [], y = [], z = [];
+  g.s.forEach((s, i) => {
+    const k = Math.round(s / LINK);
+    if (Math.abs(s - k * LINK) < 0.05 && xl[i] != null && xr[i] != null) { x.push(xl[i], xr[i], null); y.push(yl[i], yr[i], null); z.push(zl[i], zr[i], null); }
+  });
+  return {type: 'scatter3d', mode: 'lines', name: r.id + ' cross-links', legendgroup: r.id + '-links', x, y, z,
+    line: {color: '#a9b8bc', width: 2}, hoverinfo: 'skip'};
+}
+function cloudTrace() {
+  const P = D.points, idx = [];
+  P.s.forEach((s, i) => { if (inWin(s)) idx.push(i); });
+  const pick = k => idx.map(i => P[k][i]);
+  const world = S.frame === 'world';
+  return {type: 'scatter3d', mode: 'markers', name: 'point cloud sample (' + P.s.length.toLocaleString('en') + ' points)',
+    x: pick(world ? 'E' : 's'), y: pick(world ? 'N' : 'd'), z: pick('z'), hoverinfo: 'skip',
+    marker: {size: 1.6, opacity: 0.55, color: pick('z'), colorscale: [[0, '#c3d3d6'], [1, '#2f4f57']], cmin: P.zrange[0], cmax: P.zrange[1]}};
+}
+function cursorTrace() {
+  const x = [], y = [], z = [];
+  D.runs.forEach(r => {
+    const i = nearest(r, S.cursor), g = r.dense;
+    if (g.dL[i] == null || g.dR[i] == null) return;
+    const [xl, yl, zl] = xyz(g, 'L'), [xr, yr, zr] = xyz(g, 'R');
+    if (xl[i] == null || xr[i] == null) return;
+    x.push(xl[i], xr[i], null); y.push(yl[i], yr[i], null); z.push(zl[i], zr[i], null);
+  });
+  return {type: 'scatter3d', mode: 'lines+markers', name: 'cursor', meta: 'cursor', showlegend: false, x, y, z,
+    line: {color: '#5b2a86', width: 9}, marker: {size: 4, color: '#5b2a86'}, hoverinfo: 'skip'};
+}
+function buildTraces() {
+  const T = [];
+  if (S.cloud && D.points) T.push(cloudTrace());
+  D.runs.forEach((r, ri) => {
+    if (S.links) T.push(linkTrace(r));
+    if (S.rails) { T.push(railTrace(r, ri, 'L')); T.push(railTrace(r, ri, 'R')); }
+    if (S.centre) T.push(centreTrace(r));
+    if (S.ctrl) { T.push(ctrlTrace(r, 'L')); T.push(ctrlTrace(r, 'R')); }
+  });
+  T.push(cursorTrace());
+  return T;
+}
+
+// ---- axes, aspect, layout --------------------------------------------------------------------------------------------
+const R = k => (S.cloud && D.points) ? D.ranges[k] : D.ranges[k + '_rails'];   // axes also cover the point cloud when it is shown
+function worldWindow() {
+  const full = S.lo <= D.ranges.s[0] + 1e-9 && S.hi >= D.ranges.s[1] - 1e-9;
+  if (full) return {E: R('E'), N: R('N')};
+  const E = [], N = [];
+  D.runs.forEach(r => r.dense.s.forEach((s, i) => {
+    if (!inWin(s)) return;
+    ['L', 'R'].forEach(k => { const e = r.dense['E' + k][i], n = r.dense['N' + k][i]; if (e != null && n != null) { E.push(e); N.push(n); } });
+  }));
+  if (!E.length) return {E: R('E'), N: R('N')};
+  const rng = a => [Math.min(...a) - 1, Math.max(...a) + 1];
+  return {E: rng(E), N: rng(N)};
+}
+function axesSpec() {
+  if (S.frame === 'track') {
+    return {x: {title: 's (m)', range: [S.lo, S.hi]}, y: {title: 'd (m)', range: R('d')}, z: {title: 'Z (m)', range: R('z')}};
+  }
+  const w = worldWindow();
+  return {x: {title: 'E − ' + D.origin.E + ' (m)', range: w.E}, y: {title: 'N − ' + D.origin.N + ' (m)', range: w.N},
+          z: {title: 'Z (m)', range: R('z')}};
+}
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+function exaggerationFor(shape) {           // sideways and height stretch that give the box this shape (fractions of its length)
+  const ax = axesSpec(), xs = span(ax.x.range), ys = span(ax.y.range), zs = span(ax.z.range);
+  if (S.frame === 'track') return {ey: clamp(shape.y * xs / ys, 1, 100), ez: clamp(shape.z * xs / zs, 1, 10000)};
+  return {ey: S.ey, ez: clamp(shape.z * Math.max(xs, ys) / zs, 1, 10000)};
+}
+function keepShape(change) {                // run a change (window, point cloud on/off) without changing the shape of the box
+  const before = aspect(axesSpec());
+  change();
+  Object.assign(S, exaggerationFor(S.frame === 'track' ? {y: before.y, z: before.z} : {z: before.z}));
+}
+function aspect(ax) {
+  const xs = span(ax.x.range), ys = span(ax.y.range), zs = span(ax.z.range);
+  if (S.frame === 'track') return {x: 1, y: S.ey * ys / xs, z: S.ez * zs / xs};
+  const m = Math.max(xs, ys);
+  return {x: xs / m, y: ys / m, z: S.ez * zs / m};
+}
+function buildLayout(withCamera) {
+  const ax = axesSpec();
+  const axis = a => ({title: {text: a.title, font: {size: 12}}, range: a.range, showbackground: true, backgroundcolor: 'rgba(240,246,246,.6)',
+                      gridcolor: '#dbe6e7', zerolinecolor: '#c5d3d5', tickfont: {size: 10}});
+  const scene = {aspectmode: 'manual', aspectratio: aspect(ax), xaxis: axis(ax.x), yaxis: axis(ax.y), zaxis: axis(ax.z)};
+  if (withCamera) scene.camera = CAMS[S.cam] || CAMS.persp;
+  return {uirevision: 'keep', margin: {l: 0, r: 0, t: 0, b: 0}, paper_bgcolor: '#ffffff', scene,
+          legend: {x: 0.01, y: 0.99, bgcolor: 'rgba(255,255,255,.88)', bordercolor: '#d5e1e3', borderwidth: 1, font: {size: 12}}};
+}
+const CONFIG = {responsive: true, displaylogo: false, toImageButtonOptions: {format: 'png', filename: 'track_curve_3d', scale: 2}};
+let first = true;
+function fullRender() {
+  Plotly.react(plotDiv, buildTraces(), buildLayout(first), CONFIG);
+  first = false;
+}
+function reaspect() {
+  const a = aspect(axesSpec());
+  Plotly.relayout(plotDiv, {'scene.aspectratio.x': a.x, 'scene.aspectratio.y': a.y, 'scene.aspectratio.z': a.z});
+}
+
+// ---- cursor readout ------------------------------------------------------------------------------------------------------
+function updateCursor(moveMarker = true) {
+  el('cursOut').textContent = S.cursor.toFixed(1) + ' m';
+  const cols = '<tr><th>run</th><th>gauge mm</th><th>d L</th><th>d R</th><th>Z L</th><th>Z R</th></tr>';
+  el('readout').innerHTML = cols + D.runs.map(r => {
+    const i = nearest(r, S.cursor), g = r.dense;
+    return '<tr><td><span class="swatch" style="background:' + r.colour + '"></span>' + r.id + '</td><td>' + fmt(g.gauge[i], 1) + '</td><td>' +
+           fmt(g.dL[i], 3) + '</td><td>' + fmt(g.dR[i], 3) + '</td><td>' + fmt(g.zL[i], 4) + '</td><td>' + fmt(g.zR[i], 4) + '</td></tr>';
+  }).join('');
+  if (!moveMarker) return;
+  const t = cursorTrace(), k = plotDiv.data ? plotDiv.data.findIndex(d => d.meta === 'cursor') : -1;
+  if (k >= 0) Plotly.restyle(plotDiv, {x: [t.x], y: [t.y], z: [t.z]}, [k]);
+}
+
+// ---- controls --------------------------------------------------------------------------------------------------------------
+function syncUI() {
+  document.querySelectorAll('#frame button').forEach(b => b.classList.toggle('on', b.dataset.v === S.frame));
+  document.querySelectorAll('#cams button').forEach(b => b.classList.toggle('on', b.dataset.v === S.cam));
+  el('ey').value = Math.round(Math.log10(S.ey) * 50);       // 1 to 100 on a log scale
+  el('ez').value = Math.round(Math.log10(S.ez) * 25);       // 1 to 10 000 on a log scale
+  const times = v => '×' + (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString('en'));
+  el('eyOut').textContent = times(S.ey);
+  el('ezOut').textContent = times(S.ez);
+  el('ey').disabled = S.frame === 'world';
+  el('eyLabel').style.opacity = S.frame === 'world' ? 0.45 : 1;
+  el('lo').value = +S.lo.toFixed(1); el('hi').value = +S.hi.toFixed(1);
+  ['rails', 'ctrl', 'centre', 'links', 'cloud'].forEach(k => { el(k).checked = !!S[k]; });
+  el('colour').value = S.colour;
+}
+function init() {
+  const prov = D.runs.map(r => r.id + ' (' + r.meta.input + ', code ' + r.meta.code + ')').join('; ');
+  el('prov').textContent = prov + '. Reference ' + D.reference.id + ', ' + D.reference.length.toFixed(0) + ' m.';
+  const opts = [['gauge', 'Gauge (mm)'], ['run', 'Run'], ['chainage', 'Chainage']];
+  el('colour').innerHTML = opts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('');
+  if (!D.points) { el('cloud').disabled = true; el('cloudLabel').style.opacity = 0.45; }
+  const c = el('cursor'); c.min = D.ranges.s[0]; c.max = D.ranges.s[1];
+  S.cursor = clamp(S.cursor, D.ranges.s[0], D.ranges.s[1]); c.value = S.cursor;
+
+  document.querySelectorAll('#frame button').forEach(b => b.onclick = () => { S.frame = b.dataset.v; syncUI(); fullRender(); updateCursor(); });
+  document.querySelectorAll('#cams button').forEach(b => b.onclick = () => {
+    S.cam = b.dataset.v; syncUI(); Plotly.relayout(plotDiv, {'scene.camera': CAMS[S.cam]}); });
+  el('ey').oninput = e => { S.ey = Math.pow(10, +e.target.value / 50); syncUI(); reaspect(); };
+  el('ez').oninput = e => { S.ez = Math.pow(10, +e.target.value / 25); syncUI(); reaspect(); };
+  ['rails', 'ctrl', 'centre', 'links'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
+  el('cloud').onchange = e => { keepShape(() => { S.cloud = e.target.checked ? 1 : 0; }); syncUI(); fullRender(); };
+  el('colour').onchange = e => { S.colour = e.target.value; fullRender(); };
+  el('cursor').oninput = e => { S.cursor = +e.target.value; updateCursor(); };
+  const setWindow = (lo, hi) => {
+    lo = Math.max(D.ranges.s[0], lo); hi = Math.min(D.ranges.s[1], hi);
+    if (!(hi - lo >= 1)) { syncUI(); return; }
+    keepShape(() => { S.lo = lo; S.hi = hi; });
+    syncUI(); fullRender(); updateCursor();
+  };
+  el('lo').onchange = e => setWindow(+e.target.value, S.hi);
+  el('hi').onchange = e => setWindow(S.lo, +e.target.value);
+  el('winAll').onclick = () => setWindow(D.ranges.s[0], D.ranges.s[1]);
+
+  Object.assign(S, exaggerationFor(SHAPE));                     // first view: the box gets the default shape
+  if ('lo' in H || 'hi' in H) keepShape(() => {
+    S.lo = clamp('lo' in H ? H.lo : S.lo, D.ranges.s[0], D.ranges.s[1]); S.hi = clamp('hi' in H ? H.hi : S.hi, D.ranges.s[0], D.ranges.s[1]);
+    if (!(S.hi - S.lo >= 1)) { S.lo = D.ranges.s[0]; S.hi = D.ranges.s[1]; }
+  });
+  if ('ey' in H) S.ey = clamp(H.ey, 1, 100);
+  if ('ez' in H) S.ez = clamp(H.ez, 1, 10000);
+  syncUI(); fullRender(); updateCursor(false);
+}
+init();
+</script>
+</body>
+</html>
