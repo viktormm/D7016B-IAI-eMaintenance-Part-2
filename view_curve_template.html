@@ -35,6 +35,9 @@
   .notes { color:var(--muted); font-size:12px; }
   .notes p { margin:6px 0; }
   .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .find { display:block; width:100%; text-align:left; margin:5px 0 0; border-left:5px solid var(--line); font-size:12px; line-height:1.3; }
+  .find.alarm { border-left-color:#c62828; }
+  .find.alert { border-left-color:#e8a317; }
   @media (max-width: 800px) {
     #app { grid-template-columns:1fr; grid-template-rows:auto 75vh; height:auto; }
     #panel { border-right:0; border-bottom:1px solid var(--line); }
@@ -66,12 +69,23 @@
     <h2>Show</h2>
     <label class="inline"><input type="checkbox" id="rails"> Catmull-Rom curves (rails)</label>
     <label class="inline"><input type="checkbox" id="ctrl"> Control points (1 m)</label>
-    <label class="inline"><input type="checkbox" id="centre"> Centreline (red)</label>
+    <label class="inline"><input type="checkbox" id="centre"> Centreline</label>
     <label class="inline"><input type="checkbox" id="links"> Cross-links every 5 m</label>
     <label class="inline" id="cloudLabel"><input type="checkbox" id="cloud"> Point cloud sample</label>
 
     <h2>Colour the rails by</h2>
     <select id="colour"></select>
+
+    <div id="stepBox">
+      <h2>Runs over time</h2>
+      <label class="inline"><input type="checkbox" id="step"> Step through the runs (the first run stays as baseline)</label>
+      <div class="row"><span>Run</span><output id="tOut"></output></div>
+      <input type="range" id="t" min="0" step="1">
+      <div class="btns"><button id="play">Play</button></div>
+      <label><span class="row"><span>Sideways change, drawn</span><output id="magOut"></output></span>
+        <input type="range" id="mag" min="0" max="60" step="1"></label>
+      <div id="findings"></div>
+    </div>
 
     <h2>Cursor along the track</h2>
     <div class="row"><span>Chainage</span><output id="cursOut"></output></div>
@@ -84,7 +98,8 @@
       <p>Drag to rotate, scroll to zoom, right-drag to pan. The camera icon above the plot saves a PNG. Click a legend entry to hide it.</p>
       <p><b>Track frame:</b> chainage <i>s</i> along the reference line, sideways offset <i>d</i> from it (left = +), and height <i>Z</i> as stored in the LiDAR file. The rails are 1.43 m apart in a track hundreds of metres long, so sideways and height are stretched; ×1 is true scale. Narrowing the window or hiding the point cloud keeps the shape of the box.</p>
       <p><b>World:</b> E and N as in the file with the origin subtracted (see the axis titles), true horizontal scale; only height is stretched.</p>
-      <p>Lines are the Catmull-Rom curve through the control points (circles); the red line is the centreline, midway between the rails. The purple bar is the cursor. <i>Z</i> is relative to the sensor, so the LiDAR track's own rails stay nearly flat.</p>
+      <p>Lines are the Catmull-Rom curve through the control points (circles); the thick line midway between the rails is the centreline (red for one run, in each run's own colour when several are shown). The purple bar is the cursor. <i>Z</i> is relative to the sensor, so the LiDAR track's own rails stay nearly flat.</p>
+      <p><b>Runs over time</b> (three or more runs): the first run stays on screen as the baseline and one later run is shown against it; the slider or Play steps through the runs. The changes are millimetres, so the later run's sideways change against the baseline is drawn larger than it is (slider; ×1 is true size) – its position on screen is then not to scale. The cursor table always gives the measured values, and its last row is the change between the two runs in mm. <i>Colour by change</i> colours the later run's rails by their gauge change and its centreline by its sideways change (orange: wider or to the left, blue: narrower or to the right); the baseline is grey. If the runs carry findings (simulated monitoring), the alerts and alarms of the run on screen are listed under the slider and marked as a strip under the track (amber: alert, red: alarm); click one to go to that stretch.</p>
     </div>
   </div>
   <div id="plot"></div>
@@ -98,21 +113,28 @@ const plotDiv = el('plot');
 const LINK = 5;                                   // cross-link spacing (m)
 const GAUGE_SCALE = [[0, '#1f5fae'], [0.5, '#7c9299'], [1, '#e8a317']];   // narrow, median, wide (no red: that is the centreline)
 const CENTRE_RED = '#e3000f';
+const centreColour = r => D.runs.length > 1 ? r.colour : CENTRE_RED;   // one run: red; several runs: each run's own colour
 const CAMS = {
   persp: {eye: {x: -0.5, y: -0.95, z: 0.5}, up: {x: 0, y: 0, z: 1}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
   top:   {eye: {x: 0, y: 0, z: 1.0},       up: {x: 0, y: 1, z: 0}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
   side:  {eye: {x: 0, y: -1.0, z: 0},      up: {x: 0, y: 0, z: 1}, center: {x: 0, y: 0, z: 0}, projection: {type: 'perspective'}},
 };
 const SHAPE = {y: 0.28, z: 0.06};                 // the box at first: sideways and height as a fraction of its length
-const S = {frame: 'track', colour: D.runs.length > 1 ? 'run' : 'gauge', ey: 1, ez: 1, cam: 'persp',
+const CHANGE_SCALE = [[0, '#1f5fae'], [0.5, '#d5dcde'], [1, '#d9822b']], CHANGE_RANGE = 5;   // change against the first run: -5 to +5 mm
+const BASE_GREY = '#9aa7ab';                      // the baseline when the other run is coloured by its change
+const LEVEL_COLOUR = {ALARM: '#c62828', ALERT: '#e8a317'};    // findings of a run (simulated monitoring)
+const HAS_FINDINGS = D.runs.some(r => (r.findings || []).length);
+const MANY = D.runs.length > 4;                   // more runs than colours: one run at a time against the first
+const S = {frame: 'track', colour: MANY ? 'change' : D.runs.length > 1 ? 'run' : 'gauge', ey: 1, ez: 1, cam: 'persp',
            lo: D.ranges.s[0], hi: D.ranges.s[1], cursor: Math.round((D.ranges.s[0] + D.ranges.s[1]) / 2),
-           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0};
+           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0,
+           step: MANY ? 1 : 0, t: D.runs.length - 1, mag: 100};       // mag: the sideways change is drawn this many times too large
 const H = {};                                     // settings from the address, e.g. #frame=world&lo=140&hi=170
 (location.hash || '').slice(1).split('&').forEach(kv => {
   const [k, v] = kv.split('=');
   if (k in S && v !== undefined) H[k] = typeof S[k] === 'number' ? +v : decodeURIComponent(v);
 });
-['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud'].forEach(k => { if (k in H) S[k] = H[k]; });
+['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud', 'step', 't', 'mag'].forEach(k => { if (k in H) S[k] = H[k]; });
 if (!D.points) S.cloud = 0;
 
 // ---- helpers -------------------------------------------------------------------------------------------------------
@@ -127,10 +149,44 @@ function xyz(g, side) {       // one rail (L, R) or the centreline (C) of a curv
   return a.map(v => masked(v, g.s));
 }
 const nearest = (r, s) => Math.max(0, Math.min(r.dense.s.length - 1, Math.round((s - r.dense.s[0]) / D.step)));
+const STEP_COLOURS = ['#028090', '#D9822B'];      // stepping through the runs: the baseline and the current run
+function magnified(g, b, f) { // a curve object with its sideways change against the baseline b drawn f times too large
+  const step = b.s[1] - b.s[0], j = g.s.map(s => Math.round((s - b.s[0]) / step));
+  const change = (k, i) => { const v = g[k][i], w = b[k][j[i]]; return v == null || w == null ? null : v - w; };
+  const out = Object.assign({}, g);
+  ['dL', 'dR', 'EL', 'NL', 'ER', 'NR'].forEach(k => {
+    out[k] = g[k].map((v, i) => { const c = change(k, i); return c == null ? v : b[k][j[i]] + f * c; });
+  });
+  out.dGauge = g.s.map((s, i) => change('gauge', i));                          // mm
+  out.dCentre = g.s.map((s, i) => { const l = change('dL', i), r = change('dR', i); return l == null || r == null ? null : (l + r) * 500; });
+  return out;
+}
+function shown() {            // the runs on screen: all of them, or the first run and one later run
+  if (!S.step || D.runs.length < 3) return D.runs;
+  const base = Object.assign({}, D.runs[0], {colour: STEP_COLOURS[0]}), cur = D.runs[S.t];
+  if (S.t === 0) return [base];
+  return [base, Object.assign({}, cur, {colour: STEP_COLOURS[1], actual: cur.dense,     // actual: the curve as measured
+    dense: magnified(cur.dense, base.dense, S.mag), ctrl: magnified(cur.ctrl, base.ctrl, S.mag)})];
+}
+let dCache = {key: '', range: null};
+function dRange() {           // the sideways axis, widened when a magnified change would leave it; the same for every run,
+  const r = R('d');           // so that stepping through the runs does not move the view
+  if (!S.step || S.mag <= 1 || D.runs.length < 3) return r;
+  const key = [S.mag, S.lo, S.hi, r[0], r[1]].join('|');
+  if (dCache.key !== key) {
+    let lo = r[0], hi = r[1];
+    D.runs.slice(1).forEach(run => {
+      const g = magnified(run.dense, D.runs[0].dense, S.mag);
+      ['dL', 'dR'].forEach(k => g[k].forEach((v, i) => { if (v != null && inWin(g.s[i])) { if (v < lo) lo = v; if (v > hi) hi = v; } }));
+    });
+    dCache = {key, range: lo < r[0] || hi > r[1] ? [lo - 0.05, hi + 0.05] : r};
+  }
+  return dCache.range;
+}
 
 // ---- traces --------------------------------------------------------------------------------------------------------
 function railTrace(r, ri, side) {
-  const g = r.dense, [x, y, z] = xyz(g, side), left = side === 'L';
+  const g = r.dense, m = r.actual || g, [x, y, z] = xyz(g, side), left = side === 'L';
   const label = r.id + (left ? ' left' : ' right');
   const line = {width: 7};
   if (S.colour === 'gauge') {
@@ -139,11 +195,14 @@ function railTrace(r, ri, side) {
   } else if (S.colour === 'chainage') {
     Object.assign(line, {color: g.s, colorscale: 'Viridis', cmin: D.ranges.s[0], cmax: D.ranges.s[1],
       showscale: ri === 0 && left, colorbar: {title: {text: 'chainage s (m)'}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
+  } else if (S.colour === 'change' && g.dGauge) {
+    Object.assign(line, {color: g.dGauge, colorscale: CHANGE_SCALE, cmin: -CHANGE_RANGE, cmax: CHANGE_RANGE, showscale: left,
+      colorbar: {title: {text: 'change (mm)<br>rails: gauge<br>centreline: sideways'}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
   } else {
-    line.color = r.colour;
+    line.color = S.colour === 'change' ? BASE_GREY : r.colour;
   }
   return {type: 'scatter3d', mode: 'lines', name: r.id + ' curves', legendgroup: r.id + '-rails', showlegend: left,
-    x, y, z, line, customdata: g.s.map((s, i) => [s, g.gauge[i], g['d' + side][i], g['z' + side][i]]),
+    x, y, z, line, customdata: m.s.map((s, i) => [s, m.gauge[i], m['d' + side][i], m['z' + side][i]]),
     hovertemplate: 's %{customdata[0]:.1f} m<br>gauge %{customdata[1]:.1f} mm<br>d %{customdata[2]:.4f} m<br>Z %{customdata[3]:.4f} m<extra>' + label + '</extra>'};
 }
 function ctrlTrace(r, side) {
@@ -154,9 +213,10 @@ function ctrlTrace(r, side) {
     hovertemplate: 'control point<br>s %{customdata[0]:.0f} m<br>gauge %{customdata[1]:.1f} mm<extra>' + r.id + (left ? ' left' : ' right') + '</extra>'};
 }
 function centreTrace(r) {
-  const [x, y, z] = xyz(r.dense, 'C');
-  return {type: 'scatter3d', mode: 'lines', name: r.id + ' centreline', legendgroup: r.id + '-centre', x, y, z,
-    line: {color: CENTRE_RED, width: 9}, hoverinfo: 'skip'};
+  const g = r.dense, [x, y, z] = xyz(g, 'C');
+  const line = {width: 9, color: S.colour === 'change' ? BASE_GREY : centreColour(r)};
+  if (S.colour === 'change' && g.dCentre) Object.assign(line, {color: g.dCentre, colorscale: CHANGE_SCALE, cmin: -CHANGE_RANGE, cmax: CHANGE_RANGE});
+  return {type: 'scatter3d', mode: 'lines', name: r.id + ' centreline', legendgroup: r.id + '-centre', x, y, z, line, hoverinfo: 'skip'};
 }
 function linkTrace(r) {
   const g = r.dense, [xl, yl, zl] = xyz(g, 'L'), [xr, yr, zr] = xyz(g, 'R'), x = [], y = [], z = [];
@@ -178,7 +238,7 @@ function cloudTrace() {
 }
 function cursorTrace() {
   const x = [], y = [], z = [];
-  D.runs.forEach(r => {
+  shown().forEach(r => {
     const i = nearest(r, S.cursor), g = r.dense;
     if (g.dL[i] == null || g.dR[i] == null) return;
     const [xl, yl, zl] = xyz(g, 'L'), [xr, yr, zr] = xyz(g, 'R');
@@ -188,15 +248,26 @@ function cursorTrace() {
   return {type: 'scatter3d', mode: 'lines+markers', name: 'cursor', meta: 'cursor', showlegend: false, x, y, z,
     line: {color: '#5b2a86', width: 9}, marker: {size: 4, color: '#5b2a86'}, hoverinfo: 'skip'};
 }
+function findingTraces() {    // the alerts and alarms of the run on screen, as a strip under the baseline's centreline
+  if (!S.step || !S.t) return [];
+  const base = D.runs[0].dense, [x, y] = xyz(base, 'C'), zlo = R('z')[0];
+  return (D.runs[S.t].findings || []).map(f => {
+    const on = i => base.s[i] >= f.from && base.s[i] <= f.to && x[i] != null && y[i] != null;
+    return {type: 'scatter3d', mode: 'lines', name: f.text.split(' → ')[0], hoverinfo: 'name',
+      x: x.map((v, i) => on(i) ? v : null), y: y.map((v, i) => on(i) ? v : null), z: x.map((v, i) => on(i) ? zlo : null),
+      line: {color: LEVEL_COLOUR[f.level] || '#888888', width: 14}};
+  });
+}
 function buildTraces() {
   const T = [];
   if (S.cloud && D.points) T.push(cloudTrace());
-  D.runs.forEach((r, ri) => {
+  shown().forEach((r, ri) => {
     if (S.links) T.push(linkTrace(r));
     if (S.rails) { T.push(railTrace(r, ri, 'L')); T.push(railTrace(r, ri, 'R')); }
     if (S.centre) T.push(centreTrace(r));
     if (S.ctrl) { T.push(ctrlTrace(r, 'L')); T.push(ctrlTrace(r, 'R')); }
   });
+  findingTraces().forEach(t => T.push(t));
   T.push(cursorTrace());
   return T;
 }
@@ -217,7 +288,7 @@ function worldWindow() {
 }
 function axesSpec() {
   if (S.frame === 'track') {
-    return {x: {title: 's (m)', range: [S.lo, S.hi]}, y: {title: 'd (m)', range: R('d')}, z: {title: 'Z (m)', range: R('z')}};
+    return {x: {title: 's (m)', range: [S.lo, S.hi]}, y: {title: 'd (m)', range: dRange()}, z: {title: 'Z (m)', range: R('z')}};
   }
   const w = worldWindow();
   return {x: {title: 'E − ' + D.origin.E + ' (m)', range: w.E}, y: {title: 'N − ' + D.origin.N + ' (m)', range: w.N},
@@ -245,7 +316,9 @@ function buildLayout(withCamera) {
   const axis = a => ({title: {text: a.title, font: {size: 12}}, range: a.range, showbackground: true, backgroundcolor: 'rgba(240,246,246,.6)',
                       gridcolor: '#dbe6e7', zerolinecolor: '#c5d3d5', tickfont: {size: 10}});
   const scene = {aspectmode: 'manual', aspectratio: aspect(ax), xaxis: axis(ax.x), yaxis: axis(ax.y), zaxis: axis(ax.z)};
-  if (withCamera) scene.camera = CAMS[S.cam] || CAMS.persp;
+  // every redraw passes the camera as it is now: left out, the user's zoom and rotation would be dropped for the default view
+  const live = !withCamera && plotDiv.layout && plotDiv.layout.scene && plotDiv.layout.scene.camera;
+  scene.camera = live ? JSON.parse(JSON.stringify(live)) : CAMS[S.cam] || CAMS.persp;
   return {uirevision: 'keep', margin: {l: 0, r: 0, t: 0, b: 0}, paper_bgcolor: '#ffffff', scene,
           legend: {x: 0.01, y: 0.99, bgcolor: 'rgba(255,255,255,.88)', bordercolor: '#d5e1e3', borderwidth: 1, font: {size: 12}}};
 }
@@ -264,11 +337,18 @@ function reaspect() {
 function updateCursor(moveMarker = true) {
   el('cursOut').textContent = S.cursor.toFixed(1) + ' m';
   const cols = '<tr><th>run</th><th>gauge mm</th><th>d L</th><th>d R</th><th>Z L</th><th>Z R</th></tr>';
-  el('readout').innerHTML = cols + D.runs.map(r => {
-    const i = nearest(r, S.cursor), g = r.dense;
+  const runs = shown();
+  let rows = runs.map(r => {
+    const i = nearest(r, S.cursor), g = r.actual || r.dense;
     return '<tr><td><span class="swatch" style="background:' + r.colour + '"></span>' + r.id + '</td><td>' + fmt(g.gauge[i], 1) + '</td><td>' +
            fmt(g.dL[i], 3) + '</td><td>' + fmt(g.dR[i], 3) + '</td><td>' + fmt(g.zL[i], 4) + '</td><td>' + fmt(g.zR[i], 4) + '</td></tr>';
   }).join('');
+  if (S.step && runs.length === 2) {                // the current run against the baseline, everything in mm
+    const a = runs[0].dense, b = runs[1].actual, i = nearest(runs[0], S.cursor), j = nearest(runs[1], S.cursor);
+    const mm = k => a[k][i] == null || b[k][j] == null ? '–' : ((b[k][j] - a[k][i]) * (k === 'gauge' ? 1 : 1000)).toFixed(1);
+    rows += '<tr><td>change, mm</td>' + ['gauge', 'dL', 'dR', 'zL', 'zR'].map(k => '<td>' + mm(k) + '</td>').join('') + '</tr>';
+  }
+  el('readout').innerHTML = cols + rows;
   if (!moveMarker) return;
   const t = cursorTrace(), k = plotDiv.data ? plotDiv.data.findIndex(d => d.meta === 'cursor') : -1;
   if (k >= 0) Plotly.restyle(plotDiv, {x: [t.x], y: [t.y], z: [t.z]}, [k]);
@@ -288,11 +368,24 @@ function syncUI() {
   el('lo').value = +S.lo.toFixed(1); el('hi').value = +S.hi.toFixed(1);
   ['rails', 'ctrl', 'centre', 'links', 'cloud'].forEach(k => { el(k).checked = !!S[k]; });
   el('colour').value = S.colour;
+  syncRuns();
+}
+function syncRuns() {         // the controls of "Runs over time" only, so that playing does not touch what is being typed elsewhere
+  el('step').checked = !!S.step; el('t').value = S.t;
+  el('mag').value = Math.round(Math.log10(S.mag) * 20);      // 1 to 1000 on a log scale
+  el('magOut').textContent = S.mag <= 1 ? 'true size' : '×' + Math.round(S.mag);
+  el('tOut').textContent = D.runs[S.t].id + ' (' + (S.t + 1) + ' of ' + D.runs.length + ')';
+  const found = S.step && S.t ? (D.runs[S.t].findings || []) : [];
+  el('findings').innerHTML = !HAS_FINDINGS || !S.step ? '' : found.length
+    ? found.map((f, i) => '<button class="find ' + f.level.toLowerCase() + '" data-i="' + i + '" title="Go to this stretch">' + f.text + '</button>').join('')
+    : '<p class="notes" style="margin:5px 0 0">No findings in this run.</p>';
 }
 function init() {
   const prov = D.runs.map(r => r.id + ' (' + r.meta.input + ', code ' + r.meta.code + ')').join('; ');
   el('prov').textContent = prov + '. Reference ' + D.reference.id + ', ' + D.reference.length.toFixed(0) + ' m.';
   const opts = [['gauge', 'Gauge (mm)'], ['run', 'Run'], ['chainage', 'Chainage']];
+  if (D.runs.length > 2) opts.push(['change', 'Change against the first run (mm)']);
+  else if (S.colour === 'change') S.colour = 'run';
   el('colour').innerHTML = opts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('');
   if (!D.points) { el('cloud').disabled = true; el('cloudLabel').style.opacity = 0.45; }
   const c = el('cursor'); c.min = D.ranges.s[0]; c.max = D.ranges.s[1];
@@ -305,8 +398,25 @@ function init() {
   el('ez').oninput = e => { S.ez = Math.pow(10, +e.target.value / 25); syncUI(); reaspect(); };
   ['rails', 'ctrl', 'centre', 'links'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
   el('cloud').onchange = e => { keepShape(() => { S.cloud = e.target.checked ? 1 : 0; }); syncUI(); fullRender(); };
-  el('colour').onchange = e => { S.colour = e.target.value; fullRender(); };
+  el('colour').onchange = e => { S.colour = e.target.value; if (S.colour === 'change') S.step = 1; syncUI(); fullRender(); updateCursor(false); };
   el('cursor').oninput = e => { S.cursor = +e.target.value; updateCursor(); };
+  if (D.runs.length < 3) el('stepBox').style.display = 'none';
+  el('t').max = D.runs.length - 1; S.t = clamp(Math.round(S.t), 0, D.runs.length - 1);
+  const showRuns = () => { syncRuns(); fullRender(); updateCursor(false); };
+  let held = false, quietUntil = 0;                 // no redraw from Play while the view is being dragged or zoomed
+  plotDiv.addEventListener('mousedown', () => { held = true; });
+  window.addEventListener('mouseup', () => { held = false; quietUntil = Date.now() + 300; });
+  plotDiv.addEventListener('wheel', () => { quietUntil = Date.now() + 600; }, {passive: true});
+  el('step').onchange = e => { S.step = e.target.checked ? 1 : 0; showRuns(); };
+  el('t').oninput = e => { S.t = +e.target.value; S.step = 1; showRuns(); };
+  el('mag').oninput = e => { S.mag = Math.pow(10, +e.target.value / 20); S.step = 1; showRuns(); };
+  S.mag = clamp(S.mag, 1, 1000);
+  let timer = null;
+  el('play').onclick = () => {
+    if (timer) { clearInterval(timer); timer = null; }
+    else { S.step = 1; timer = setInterval(() => { if (held || Date.now() < quietUntil) return; S.t = (S.t + 1) % D.runs.length; showRuns(); }, 900); }
+    el('play').classList.toggle('on', !!timer); el('play').textContent = timer ? 'Pause' : 'Play';
+  };
   const setWindow = (lo, hi) => {
     lo = Math.max(D.ranges.s[0], lo); hi = Math.min(D.ranges.s[1], hi);
     if (!(hi - lo >= 1)) { syncUI(); return; }
@@ -316,6 +426,13 @@ function init() {
   el('lo').onchange = e => setWindow(+e.target.value, S.hi);
   el('hi').onchange = e => setWindow(S.lo, +e.target.value);
   el('winAll').onclick = () => setWindow(D.ranges.s[0], D.ranges.s[1]);
+  el('findings').onclick = e => {                   // a finding: go to its stretch, with some track on either side
+    const b = e.target.closest ? e.target.closest('button.find') : null;
+    if (!b) return;
+    const f = D.runs[S.t].findings[+b.dataset.i];
+    S.cursor = clamp((f.from + f.to) / 2, D.ranges.s[0], D.ranges.s[1]); el('cursor').value = S.cursor;
+    setWindow(f.from - 15, f.to + 15);
+  };
 
   Object.assign(S, exaggerationFor(SHAPE));                     // first view: the box gets the default shape
   if ('lo' in H || 'hi' in H) keepShape(() => {

@@ -1,0 +1,4 @@
+indicator,detection_limit,intervention_limit
+gauge change (5 m mean) mm,1.079,3.000
+alignment change (5 m mean) mm,1.047,3.500
+TQI (gauge) increase,18.349,36.698

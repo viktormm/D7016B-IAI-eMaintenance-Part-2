@@ -96,7 +96,7 @@ python view_curve.py run1 run2       # several runs of the same reference in one
 
 `curve3d_<runs>.html` is one self-contained page (it works offline, no server). Drag to rotate, scroll to zoom, right-drag to pan.
 
-- **Curves:** the Catmull-Rom curve of each rail, the 1 m control points it passes through, the centreline (thick red, midway between the rails) and a cross-link between the rails every 5 m. The curves are recomputed from the run's `curve.csv`, so the view is never out of date.
+- **Curves:** the Catmull-Rom curve of each rail, the 1 m control points it passes through, the centreline (thick, midway between the rails; red for one run, in each run's own colour when several are shown) and a cross-link between the rails every 5 m. The curves are recomputed from the run's `curve.csv`, so the view is never out of date.
 - **Track frame** (default): chainage `s`, sideways offset `d` and height `Z`. The rails are 1.43 m apart in a track hundreds of metres long, so sideways and height are stretched with two sliders (×1 is true scale). **World** shows `E`, `N` as in the LiDAR file at true horizontal scale.
 - **Colour** the rails by gauge, run or chainage. Coloured by gauge (the default), the 3.0 mm step at 155 m chainage shows as a change from amber (wide) to blue (narrow).
 - **Window** (from–to in metres) zooms to a stretch; the box keeps its shape. **Cursor** moves a marker along the track and reads out gauge, offsets and heights per run.
@@ -105,6 +105,34 @@ python view_curve.py run1 run2       # several runs of the same reference in one
 `python view_curve.py` also writes `output/viewer/<run>_curve.las`: both rails and the centreline every 0.1 m in the point cloud's own coordinates, with the scalar fields `s_m`, `gauge_mm` and `rail` (0 left, 1 right, 2 centre); left is orange, right is teal, centre is grey. Where a rail is missing it has no points for that stretch, and the other rail is still written. To see the curve in the original point cloud, open `gps_pointcloud_00.laz` and this file together in CloudCompare (accept the same global shift for both when it asks) and increase the point size of the curve.
 
 Both outputs are byte-identical when rebuilt from the same run. The viewer only reads the runs; it does not change them.
+
+With three or more runs the view gets a **Runs over time** control: the first run stays on screen as the baseline and one later run is shown against it; the slider or Play steps through the runs. The changes are millimetres on a 1.4 m gauge, so the later run's sideways change against the baseline is drawn larger than it is (×100 at first, slider down to true size), and with **Colour → Change against the first run** its rails are coloured by gauge change and its centreline by sideways change. The cursor table always gives the measured values; its last row is the change between the two runs in mm. The sideways axis is the same for every run, so a zoomed view stays where it is while the runs play.
+
+### Simulated sequence of runs
+
+Only one real run exists, so `simulate_runs.py` shows what the pipeline would report if the track were scanned at regular intervals:
+
+```
+python simulate_runs.py gps_pointcloud_00.laz --reference output/reference/track.json     # 13 runs, every 2 weeks
+python simulate_runs.py gps_pointcloud_00.laz --reference output/reference/track.json --view-only   # only rebuild the 3D view
+```
+
+It is a closed loop, and nothing is scripted to happen in a given week:
+
+1. **The track degrades** by an assumed model: three defects that grow linearly within a maintenance cycle (as in track geometry degradation models, see Soleimanmeigouni et al., 2018) — a gauge widening at 100–120 m (0.25 mm a week), an alignment defect around 210 m (0.35 mm a week) and a short-wave gauge irregularity at 227–248 m (1 m wavelength, 0.10 mm a week).
+2. **Every run is scanned and measured**: a different pseudo-random half of the point cloud (its own sampling noise, like a real run) with that week's defects added, built by the unchanged pipeline.
+3. **Indicators are checked against limits**, all against the first run: the gauge change and the sideways change of the centreline as a 5 m mean along the curve, and the increase of the TQI (gauge) of every 25 m section. Detection limits are calibrated from four extra runs *without* degradation (the largest value they reach, times 1.2); above them a finding is an **alert**. Intervention limits are assumed (3.0 mm gauge, 3.5 mm alignment, twice the TQI detection limit); at or above them it is an **alarm**.
+4. **An alarm orders maintenance** on the alarmed stretch (gauge correction, lining or fastening renewal). It is done before the next run and resets the defects of that kind there, after which they grow again.
+
+`--position-sigma MM` adds a random sideways positioning error per run, which is taken out again (median offset) before the runs are compared.
+
+The runs are written to `output/runs/sim_wNN/` (NN = week; their `meta.json` says they are simulated and lists their findings), the summary to `output/simulation/` (`events.csv`, `limits.csv`, `timeline.csv`, `sections_over_time.csv`, `sim_spacetime.png`, `sim_sections.png`) and the 3D view to `output/viewer/curve3d_simulation.html`, where the alerts and alarms of the run on screen are listed under the run slider and marked under the track; clicking one goes to that stretch.
+
+With the default settings the alignment defect raises an alert in week 4 and alarms in weeks 10 and 20, the gauge widening an alert in week 4 and an alarm in week 14, and the short-wave irregularity a TQI alert in week 16 and an alarm in week 24. The curve finds the first two and not the third; the TQI finds the third and not the first two. Three of the 37 findings are false alerts (short and within 0.25 mm of the limit); none of the four alarms is.
+
+The sequence shows the behaviour of the method, not of the track: the degradation and the intervention limits are assumed, the rates are chosen so that a whole cycle fits in 24 weeks, and all runs come from one acquisition, so the positioning error between real runs is not in it unless `--position-sigma` is used.
+
+Soleimanmeigouni, I., Ahmadi, A. and Kumar, U. (2018). "Track geometry degradation and maintenance modelling: A review". Proceedings of the Institution of Mechanical Engineers, Part F: Journal of Rail and Rapid Transit, 232(1), pp. 73–102.
 
 ### Assumptions and limits
 
@@ -188,6 +216,7 @@ cloud runs.
 | `track_curve.py` | The pipeline: reference frame, per-run curve, sections and TQI, comparison of runs, self-test |
 | `catmull_rom.py` | Centripetal Catmull-Rom curve math used by the pipeline |
 | `view_curve.py`, `view_curve_template.html` | The 3D viewer and the CloudCompare export (kept apart from the pipeline, so they do not change the code hash of the runs) |
+| `simulate_runs.py` | A simulated sequence of runs from the one scan, with an assumed degradation, to show what the comparison would report over time |
 | `gps_pointcloud_00.laz` | The first run: LiDAR point cloud of a two-track line (LAS 1.2, point format 0, no timestamps or coordinate system) |
 | `output/reference/track.json` | The reference frame every run is projected onto |
 | `output/runs/run1/` | The curve and measurements of run 1 (see the table above) |
@@ -195,6 +224,7 @@ cloud runs.
 | `output/viewer/` | The 3D view (`curve3d_<runs>.html`) and the curve as a LAS file for CloudCompare (`<run>_curve.las`) |
 | `output/figures/` | Figures made for the slides and the report. The scripts that drew them are not kept in the repo |
 | `D7016B_Demo1_Viktor_Lindberg.pptx` | Slides: Demonstration 1 (slides 1–14, original idea) and the Demonstration 2 part (slides 15–23, follow the track over time) |
+| `D7016B_Demo2_Viktor_Lindberg.pptx` | Slides for Demonstration 2 on their own, six slides: change of idea and the data, method, test on the real scan, simulated monitoring, where it stands |
 | `Industrial AI - Part II .docx` | Final report, based on the course report template |
 | `PointCloud_Project_Time_Plan_Viktor - Rough_Final.xlsx` | The original time plan, not updated for the new direction |
 | `1-s2.0-S0968090X18302444-main.pdf` | Sharma et al. (2018), the reference paper for the geometry parameters and TQI |

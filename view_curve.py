@@ -66,6 +66,7 @@ def json_run(run, c, dense, colour, origin):
     gauge = (g["d_left"] - g["d_right"]) * 1e3
     cg = (c["d_left"] - c["d_right"]) * 1e3
     return {"id": run["meta"]["run_id"], "colour": colour,
+            "findings": run["meta"].get("findings", []),      # alerts and alarms of a simulated run (simulate_runs.py), if any
             "meta": {"reference": run["meta"]["reference"], "code": run["meta"]["code"],
                      "input": run["meta"]["input"]["file"], "sha256": run["meta"]["input"]["sha256"][:12]},
             "dense": {"s": _list(g["s"], 3), "dL": _list(g["d_left"], 5), "dR": _list(g["d_right"], 5),
