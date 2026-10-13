@@ -72,6 +72,8 @@
     <label class="inline"><input type="checkbox" id="centre"> Centreline</label>
     <label class="inline"><input type="checkbox" id="links"> Cross-links every 5 m</label>
     <label class="inline" id="cloudLabel"><input type="checkbox" id="cloud"> Point cloud sample</label>
+    <label class="inline" id="sleepersLabel"><input type="checkbox" id="sleepers"> Sleepers found</label>
+    <label class="inline" id="wireLabel"><input type="checkbox" id="wire"> Contact wire (drawn at the top of the box; its sideways zigzag is true, its height is the colour)</label>
 
     <h2>Colour the rails by</h2>
     <select id="colour"></select>
@@ -92,6 +94,7 @@
     <input type="range" id="cursor" step="0.1">
     <table id="readout"></table>
     <p class="notes" style="margin:4px 0 0">d and Z in metres; L = left rail, R = right rail.</p>
+    <p class="notes" id="extraOut" style="margin:4px 0 0"></p>
 
     <h2>Notes</h2>
     <div class="notes">
@@ -99,6 +102,7 @@
       <p><b>Track frame:</b> chainage <i>s</i> along the reference line, sideways offset <i>d</i> from it (left = +), and height <i>Z</i> as stored in the LiDAR file. The rails are 1.43 m apart in a track hundreds of metres long, so sideways and height are stretched; ×1 is true scale. Narrowing the window or hiding the point cloud keeps the shape of the box.</p>
       <p><b>World:</b> E and N as in the file with the origin subtracted (see the axis titles), true horizontal scale; only height is stretched.</p>
       <p>Lines are the Catmull-Rom curve through the control points (circles); the thick line midway between the rails is the centreline (red for one run, in each run's own colour when several are shown). The purple bar is the cursor. <i>Z</i> is relative to the sensor, so the LiDAR track's own rails stay nearly flat.</p>
+      <p><b>More per point</b> (after <code>curve_attributes.py</code>): the rails can be coloured by the sideways tilt of the rail head, the height above the nearest sleeper, the 3 m surface mid-chord, the twist over 3 m and the cross-level relative to its median; the sleepers found are drawn as marks across the track; the values at the cursor are listed under the table. Cross-level and twist are the same for both rails. The height is relative to the sensor, so only short changes in these are meaningful.</p>
       <p><b>Runs over time</b> (three or more runs): the first run stays on screen as the baseline and one later run is shown against it; the slider or Play steps through the runs. The changes are millimetres, so the later run's sideways change against the baseline is drawn larger than it is (slider; ×1 is true size) – its position on screen is then not to scale. The cursor table always gives the measured values, and its last row is the change between the two runs in mm. <i>Colour by change</i> colours the later run's rails by their gauge change and its centreline by its sideways change (orange: wider or to the left, blue: narrower or to the right); the baseline is grey. If the runs carry findings (simulated monitoring), the alerts and alarms of the run on screen are listed under the slider and marked as a strip under the track (amber: alert, red: alarm); click one to go to that stretch.</p>
     </div>
   </div>
@@ -124,17 +128,28 @@ const CHANGE_SCALE = [[0, '#1f5fae'], [0.5, '#d5dcde'], [1, '#d9822b']], CHANGE_
 const BASE_GREY = '#9aa7ab';                      // the baseline when the other run is coloured by its change
 const LEVEL_COLOUR = {ALARM: '#c62828', ALERT: '#e8a317'};    // findings of a run (simulated monitoring)
 const HAS_FINDINGS = D.runs.some(r => (r.findings || []).length);
+const SEQ_SCALE = [[0, '#c9e3e6'], [1, '#0b4a52']];
+const EXTRA = {                                   // colour modes from curve_attributes.py, when the run has them
+  tilt:    {label: 'Rail-head sideways tilt', key: 'tilt', scale: CHANGE_SCALE, range: [-0.1, 0.1], title: 'head tilt n_d<br>+ leans left'},
+  sleeper: {label: 'Height above nearest sleeper (mm)', key: 'sleeper', scale: SEQ_SCALE, range: (D.extra_ranges || {}).sleeper || [150, 220], title: 'above sleeper<br>(mm)'},
+  surface: {label: 'Surface: 3 m mid-chord (mm)', key: 'surf', scale: CHANGE_SCALE, range: [-3, 3], title: '3 m mid-chord<br>(mm)'},
+  twist:   {label: 'Twist over 3 m (mm)', key: 'twist', scale: CHANGE_SCALE, range: [-5, 5], title: 'twist 3 m<br>(mm)'},
+  cross:   {label: 'Cross-level, relative to its median (mm)', key: 'cross', scale: CHANGE_SCALE, range: [-5, 5], title: 'cross-level<br>rel. (mm)'},
+};
+const HAS_EXTRA = D.runs.some(r => r.dense.tiltL);
+const HAS_SLEEPERS = D.runs.some(r => r.sleepers);
+const HAS_WIRE = D.runs.some(r => r.wire);
 const MANY = D.runs.length > 4;                   // more runs than colours: one run at a time against the first
 const S = {frame: 'track', colour: MANY ? 'change' : D.runs.length > 1 ? 'run' : 'gauge', ey: 1, ez: 1, cam: 'persp',
            lo: D.ranges.s[0], hi: D.ranges.s[1], cursor: Math.round((D.ranges.s[0] + D.ranges.s[1]) / 2),
-           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0,
+           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0, sleepers: 0, wire: 0,
            step: MANY ? 1 : 0, t: D.runs.length - 1, mag: 100};       // mag: the sideways change is drawn this many times too large
 const H = {};                                     // settings from the address, e.g. #frame=world&lo=140&hi=170
 (location.hash || '').slice(1).split('&').forEach(kv => {
   const [k, v] = kv.split('=');
   if (k in S && v !== undefined) H[k] = typeof S[k] === 'number' ? +v : decodeURIComponent(v);
 });
-['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud', 'step', 't', 'mag'].forEach(k => { if (k in H) S[k] = H[k]; });
+['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers', 'wire', 'step', 't', 'mag'].forEach(k => { if (k in H) S[k] = H[k]; });
 if (!D.points) S.cloud = 0;
 
 // ---- helpers -------------------------------------------------------------------------------------------------------
@@ -198,6 +213,10 @@ function railTrace(r, ri, side) {
   } else if (S.colour === 'change' && g.dGauge) {
     Object.assign(line, {color: g.dGauge, colorscale: CHANGE_SCALE, cmin: -CHANGE_RANGE, cmax: CHANGE_RANGE, showscale: left,
       colorbar: {title: {text: 'change (mm)<br>rails: gauge<br>centreline: sideways'}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
+  } else if (EXTRA[S.colour] && g[EXTRA[S.colour].key + (left ? 'L' : 'R')]) {
+    const e = EXTRA[S.colour];
+    Object.assign(line, {color: g[e.key + (left ? 'L' : 'R')], colorscale: e.scale, cmin: e.range[0], cmax: e.range[1],
+      showscale: ri === 0 && left, colorbar: {title: {text: e.title}, len: 0.45, thickness: 12, x: 0.99, y: 0.3}});
   } else {
     line.color = S.colour === 'change' ? BASE_GREY : r.colour;
   }
@@ -258,9 +277,34 @@ function findingTraces() {    // the alerts and alarms of the run on screen, as 
       line: {color: LEVEL_COLOUR[f.level] || '#888888', width: 14}};
   });
 }
+function sleeperTrace(r) {    // a mark across the track at every sleeper found (curve_attributes.py)
+  const p = r.sleepers, x = [], y = [], z = [];
+  p.s.forEach((s, i) => {
+    if (!inWin(s)) return;
+    if (S.frame === 'track') { x.push(s, s, null); y.push(0.85, -0.85, null); }
+    else { x.push(p.EL[i], p.ER[i], null); y.push(p.NL[i], p.NR[i], null); }
+    z.push(p.z[i], p.z[i], null);
+  });
+  return {type: 'scatter3d', mode: 'lines', name: r.id + ' sleepers (' + p.s.length + ')', legendgroup: r.id + '-sleepers', x, y, z,
+    line: {color: '#8a7a66', width: 3}, hoverinfo: 'skip'};
+}
+function wireTrace(r) {       // the contact wire (contact_wire.py): 5.5 m above the rails in reality, which the height stretch cannot show,
+  const w = r.wire, x = [], y = [], z = [], h = [], c = [];       // so it is drawn at the top of the box with its true sideways zigzag and its height as colour
+  const ztop = R('z')[1], world = S.frame === 'world';
+  w.s.forEach((s, i) => {
+    if (!inWin(s) || w.d[i] == null || w.h[i] == null) return;
+    x.push(world ? w.E[i] : s); y.push(world ? w.N[i] : w.d[i]); z.push(ztop); h.push(w.h[i]); c.push([s, w.h[i], w.stagger[i]]);
+  });
+  return {type: 'scatter3d', mode: 'lines+markers', name: 'contact wire (height by colour)', legendgroup: 'wire', x, y, z,
+    line: {color: '#333333', width: 3}, marker: {size: 2.5, color: h, colorscale: 'Viridis', cmin: 5.4, cmax: 6.1, showscale: true,
+    colorbar: {title: {text: 'wire height<br>above rail (m)'}, len: 0.3, thickness: 10, x: 0.99, y: 0.85}},
+    customdata: c, hovertemplate: 's %{customdata[0]:.1f} m<br>height above rail %{customdata[1]:.3f} m<br>stagger %{customdata[2]:+.3f} m<extra>contact wire</extra>'};
+}
 function buildTraces() {
   const T = [];
   if (S.cloud && D.points) T.push(cloudTrace());
+  if (S.sleepers) shown().filter(r => r.sleepers).slice(0, 1).forEach(r => T.push(sleeperTrace(r)));
+  if (S.wire) shown().filter(r => r.wire).slice(0, 1).forEach(r => T.push(wireTrace(r)));
   shown().forEach((r, ri) => {
     if (S.links) T.push(linkTrace(r));
     if (S.rails) { T.push(railTrace(r, ri, 'L')); T.push(railTrace(r, ri, 'R')); }
@@ -349,6 +393,13 @@ function updateCursor(moveMarker = true) {
     rows += '<tr><td>change, mm</td>' + ['gauge', 'dL', 'dR', 'zL', 'zR'].map(k => '<td>' + mm(k) + '</td>').join('') + '</tr>';
   }
   el('readout').innerHTML = cols + rows;
+  const r0 = runs.find(r => r.dense.tiltL);
+  if (r0) {
+    const g = r0.actual || r0.dense, i = nearest(r0, S.cursor), v = (k, n) => fmt(g[k][i], n);
+    el('extraOut').innerHTML = '<b>' + r0.id + ' at the cursor:</b> head tilt L ' + v('tiltL', 3) + ' / R ' + v('tiltR', 3) +
+      ' · above sleeper L ' + v('sleeperL', 0) + ' / R ' + v('sleeperR', 0) + ' mm · surface 3 m L ' + v('surfL', 1) + ' / R ' + v('surfR', 1) +
+      ' mm · twist ' + v('twistL', 1) + ' mm · cross-level ' + v('crossL', 1) + ' mm (rel.)';
+  }
   if (!moveMarker) return;
   const t = cursorTrace(), k = plotDiv.data ? plotDiv.data.findIndex(d => d.meta === 'cursor') : -1;
   if (k >= 0) Plotly.restyle(plotDiv, {x: [t.x], y: [t.y], z: [t.z]}, [k]);
@@ -366,7 +417,7 @@ function syncUI() {
   el('ey').disabled = S.frame === 'world';
   el('eyLabel').style.opacity = S.frame === 'world' ? 0.45 : 1;
   el('lo').value = +S.lo.toFixed(1); el('hi').value = +S.hi.toFixed(1);
-  ['rails', 'ctrl', 'centre', 'links', 'cloud'].forEach(k => { el(k).checked = !!S[k]; });
+  ['rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers', 'wire'].forEach(k => { el(k).checked = !!S[k]; });
   el('colour').value = S.colour;
   syncRuns();
 }
@@ -386,6 +437,9 @@ function init() {
   const opts = [['gauge', 'Gauge (mm)'], ['run', 'Run'], ['chainage', 'Chainage']];
   if (D.runs.length > 2) opts.push(['change', 'Change against the first run (mm)']);
   else if (S.colour === 'change') S.colour = 'run';
+  if (HAS_EXTRA) Object.entries(EXTRA).forEach(([k, e]) => opts.push([k, e.label]));
+  if (!HAS_SLEEPERS) { el('sleepers').disabled = true; el('sleepersLabel').style.opacity = 0.45; S.sleepers = 0; }
+  if (!HAS_WIRE) { el('wire').disabled = true; el('wireLabel').style.opacity = 0.45; S.wire = 0; }
   el('colour').innerHTML = opts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('');
   if (!D.points) { el('cloud').disabled = true; el('cloudLabel').style.opacity = 0.45; }
   const c = el('cursor'); c.min = D.ranges.s[0]; c.max = D.ranges.s[1];
@@ -396,7 +450,7 @@ function init() {
     S.cam = b.dataset.v; syncUI(); Plotly.relayout(plotDiv, {'scene.camera': CAMS[S.cam]}); });
   el('ey').oninput = e => { S.ey = Math.pow(10, +e.target.value / 50); syncUI(); reaspect(); };
   el('ez').oninput = e => { S.ez = Math.pow(10, +e.target.value / 25); syncUI(); reaspect(); };
-  ['rails', 'ctrl', 'centre', 'links'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
+  ['rails', 'ctrl', 'centre', 'links', 'sleepers', 'wire'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
   el('cloud').onchange = e => { keepShape(() => { S.cloud = e.target.checked ? 1 : 0; }); syncUI(); fullRender(); };
   el('colour').onchange = e => { S.colour = e.target.value; if (S.colour === 'change') S.step = 1; syncUI(); fullRender(); updateCursor(false); };
   el('cursor').oninput = e => { S.cursor = +e.target.value; updateCursor(); };

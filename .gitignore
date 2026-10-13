@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# Office lock and temp files
+~$*
+*.tmp
+
+# Local drafts, not for GitHub
+Report rough draft.docx

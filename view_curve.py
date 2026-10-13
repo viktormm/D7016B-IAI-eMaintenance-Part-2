@@ -57,7 +57,45 @@ def load_curves(run_id):
     ok = np.flatnonzero(np.isfinite(dense["E_centre"]) & np.isfinite(dense["Z_centre"]))
     lo, hi = ok[0], ok[-1] + 1
     dense = {k: v[lo:hi] for k, v in dense.items()}          # trim the ends, keep gaps inside as gaps
+    dense.update(load_attributes(os.path.join(tc.OUT, "runs", run_id), dense["s"]))
     return run, c, dense
+
+
+def load_attributes(folder, s):
+    """The per-point attributes of curve_attributes.py, if the run has them, on the dense grid s: a dict of arrays."""
+    out = {}
+    path = os.path.join(folder, "curve_attributes.csv")
+    if os.path.exists(path):
+        t = np.genfromtxt(path, delimiter=",", names=True)
+        for side in ("left", "right"):
+            out["tilt_" + side] = _nearest(s, t["s"], t["n_d_" + side])
+            out["sleeper_" + side] = _nearest(s, t["s"], t["above_sleeper_" + side]) * 1e3
+    path = os.path.join(folder, "shortwave.csv")
+    if os.path.exists(path):
+        t = np.genfromtxt(path, delimiter=",", names=True)
+        for side in ("left", "right"):
+            out["surface_" + side] = _nearest(s, t["s"], t["surface_3m_" + side])
+        out["twist"] = _nearest(s, t["s"], t["twist_3m"])
+        cross = t["cross_level"]
+        out["cross"] = _nearest(s, t["s"], cross - np.nanmedian(cross))      # relative: the sensor rides on the rails
+    path = os.path.join(folder, "sleepers.csv")
+    if os.path.exists(path):
+        t = np.genfromtxt(path, delimiter=",", names=True)
+        out["sleepers"] = np.atleast_1d(t["s"])
+    path = os.path.join(folder, "contact_wire_dense.csv")        # the contact wire as a curve (contact_wire.py), every 0.1 m
+    if os.path.exists(path):
+        t = np.genfromtxt(path, delimiter=",", names=True)
+        out["wire"] = {k: np.asarray(t[c], float) for k, c in (("s", "s"), ("height", "height_m"), ("stagger", "stagger_m"), ("E", "E"), ("N", "N"))}
+    return out
+
+
+def _nearest(s, s_from, v):
+    """v sampled at s_from, looked up at s by the nearest sample (within half a step); NaN elsewhere."""
+    step = np.median(np.diff(s_from))
+    i = np.clip(np.round((s - s_from[0]) / step).astype(int), 0, len(s_from) - 1)
+    out = v[i].astype(float)
+    out[np.abs(s_from[i] - s) > 0.51 * step] = np.nan
+    return out
 
 
 def json_run(run, c, dense, colour, origin):
@@ -65,6 +103,12 @@ def json_run(run, c, dense, colour, origin):
     g = dense
     gauge = (g["d_left"] - g["d_right"]) * 1e3
     cg = (c["d_left"] - c["d_right"]) * 1e3
+    extra = {}                                              # the attributes of curve_attributes.py, when the run has them
+    for name, js, dec in (("tilt_left", "tiltL", 4), ("tilt_right", "tiltR", 4), ("sleeper_left", "sleeperL", 1), ("sleeper_right", "sleeperR", 1),
+                          ("surface_left", "surfL", 2), ("surface_right", "surfR", 2), ("twist", "twistL", 2), ("twist", "twistR", 2),
+                          ("cross", "crossL", 2), ("cross", "crossR", 2)):
+        if name in g:
+            extra[js] = _list(g[name], dec)
     return {"id": run["meta"]["run_id"], "colour": colour,
             "findings": run["meta"].get("findings", []),      # alerts and alarms of a simulated run (simulate_runs.py), if any
             "meta": {"reference": run["meta"]["reference"], "code": run["meta"]["code"],
@@ -72,7 +116,7 @@ def json_run(run, c, dense, colour, origin):
             "dense": {"s": _list(g["s"], 3), "dL": _list(g["d_left"], 5), "dR": _list(g["d_right"], 5),
                       "zL": _list(g["Z_left"], 5), "zR": _list(g["Z_right"], 5),
                       "EL": _list(g["E_left"] - E0, 3), "NL": _list(g["N_left"] - N0, 3),
-                      "ER": _list(g["E_right"] - E0, 3), "NR": _list(g["N_right"] - N0, 3), "gauge": _list(gauge, 2)},
+                      "ER": _list(g["E_right"] - E0, 3), "NR": _list(g["N_right"] - N0, 3), "gauge": _list(gauge, 2), **extra},
             "ctrl": {"s": _list(c["s"], 3), "dL": _list(c["d_left"], 5), "dR": _list(c["d_right"], 5),
                      "zL": _list(c["z_left"], 5), "zR": _list(c["z_right"], 5),
                      "EL": _list(c["E_left"] - E0, 3), "NL": _list(c["N_left"] - N0, 3),
@@ -143,6 +187,22 @@ def build_data(run_ids, n_points, laz):
     allN = np.concatenate([d[k] for _, _, d in loaded for k in ("N_left", "N_right")])
     origin = (float(np.floor(np.nanmin(allE) / 1000) * 1000), float(np.floor(np.nanmin(allN) / 1000) * 1000))
     runs = [json_run(run, c, d, PALETTE[i % len(PALETTE)], origin) for i, (run, c, d) in enumerate(loaded)]
+    for r, (_, _, d) in zip(runs, loaded):                   # sleeper marks across the track, in both frames
+        if "sleepers" in d:
+            ss = d["sleepers"]
+            z = np.interp(ss, d["s"][np.isfinite(d["Z_centre"])], d["Z_centre"][np.isfinite(d["Z_centre"])])
+            EL, NL = ref.to_world(ss, np.full(len(ss), 0.85))
+            ER, NR = ref.to_world(ss, np.full(len(ss), -0.85))
+            r["sleepers"] = {"s": _list(ss, 2), "z": _list(z, 4), "EL": _list(EL - origin[0], 3), "NL": _list(NL - origin[1], 3),
+                             "ER": _list(ER - origin[0], 3), "NR": _list(NR - origin[1], 3)}
+    for r, (_, _, d) in zip(runs, loaded):                   # the contact wire: sideways position in the track frame, height above the rail by colour
+        if "wire" in d:
+            w = d["wire"]
+            _, dw = ref.project(w["E"], w["N"])
+            r["wire"] = {"s": _list(w["s"], 2), "d": _list(dw, 3), "h": _list(w["height"], 3), "stagger": _list(w["stagger"], 3),
+                         "E": _list(w["E"] - origin[0], 3), "N": _list(w["N"] - origin[1], 3)}
+    sleeper_h = np.concatenate([d[k] for _, _, d in loaded for k in ("sleeper_left", "sleeper_right") if k in d] or [np.array([np.nan])])
+    extra_ranges = {"sleeper": [round(float(np.nanmedian(sleeper_h) - 20), 1), round(float(np.nanmedian(sleeper_h) + 20), 1)]} if np.isfinite(sleeper_h).any() else {}
     s_all = np.concatenate([d["s"] for _, _, d in loaded])
     s_range = (float(np.nanmin(s_all)), float(np.nanmax(s_all)))
     zs = np.concatenate([d[k] for _, _, d in loaded for k in ("Z_left", "Z_right")])
@@ -172,7 +232,7 @@ def build_data(run_ids, n_points, laz):
         ranges["N"] = span(min(np.min(points["N"]), ranges["N_rails"][0] + 1.0), max(np.max(points["N"]), ranges["N_rails"][1] - 1.0), 1.0)
     data = {"step": STEP, "origin": {"E": origin[0], "N": origin[1]},
             "reference": {"id": ref.id, "length": round(ref.length, 2)},
-            "gauge_range": [round(g_med - GAUGE_HALF_RANGE, 2), round(g_med + GAUGE_HALF_RANGE, 2)],
+            "gauge_range": [round(g_med - GAUGE_HALF_RANGE, 2), round(g_med + GAUGE_HALF_RANGE, 2)], "extra_ranges": extra_ranges,
             "ranges": ranges, "runs": runs, "points": points}
     return data, loaded
 
