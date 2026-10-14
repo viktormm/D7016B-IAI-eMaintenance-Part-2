@@ -203,7 +203,7 @@ the values are not comparable with the paper's foot-by-foot ones.
 | `output/runs/run1/` | The curve and measurements of run 1 (see the table above) |
 | `output/noise_floor.json` | Noise floor and known-change check from `selftest` |
 | `output/viewer/` | `monitor.html`, the 3D view `curve3d_run1.html` and the curve as LAS files for CloudCompare |
-| `output/figures/` | Figures made for the slides and the report (rail cross-section, curve through control points, gauge per slab and section) |
+| `output/figures/` | The report's figures: `f2_rail_section.png` and `f6_catmull_rom.png` (method, from the first scope) and `r1`–`r4` from `report_figures.py` |
 | `D7016B_Demo1_Viktor_Lindberg.pptx`, `D7016B_Demo2_Viktor_Lindberg.pptx` | Slides for Demonstrations 1 and 2 (the Demo 2 deck predates the scale-down) |
 | `Industrial AI - Part II .docx` | Final report, based on the course report template. Local drafts of it (`Report rough draft.docx`) are ignored by git, see `.gitignore` |
 | `PointCloud_Project_Time_Plan_Viktor - Rough_Final (2).xlsx` | The original time plan |
