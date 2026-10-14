@@ -166,6 +166,17 @@ as points in the scan's own coordinates, for CloudCompare on top of
 - **Contact wire:** found in 249 of 264 metres. Height above the rail 5.52–6.05 m, median 5.65 m; stagger −0.58 to +0.59 m. The height is above the TSI nominal upper bound of 5.75 m over 90–105 m and from 223 m to the end (up to 6.05 m), and the stagger is beyond ±0.40 m over 90–109 m and from 236 m to the end (48 metres; 12 beyond ±0.55 m, at 90–95 m and 258 m to the end). Two wires run side by side in 101 metres, mostly between 107 and 220 m. The excursions sit just before and just after that stretch, which is what an overlap section looks like (the outgoing wire rises and moves aside while the next takes over; the wire tracked at the end is probably the one going to its anchor), so they are most likely geometry of the overhead line rather than faults. The tracking does not tell which of the two wires is the running one inside the overlap. Nothing exceeds the TSI maximum of 6.50 m.
 - **Track states** (`report_figures.py`, k = 3, all 11 features): three contiguous stretches, 0–64 m, 69–170 m and 184–259 m, with the boundaries where the gauge, the rail-head intensity and the wire change together. The split near 155–170 m matches the gauge step. No metre scores above 2σ from its own state's centre.
 
+## How the code was written
+
+The code was written with Claude Code, Anthropic's AI coding assistant, under the
+author's direction: the author set the scope, the research questions, the limits and
+the checks; the assistant wrote, ran and revised the code, the figures and the page.
+The reason was speed under a scope that changed several times. Because that makes
+the code easy to treat as a black box, correctness rests on tests rather than trust:
+the half-scan noise floor (`track_curve.py selftest`), the band and offset checks
+(`error_checks.py`), the automatic test of the monitor page, and every number in the
+report traced back to the files in `output/`.
+
 ## Assumptions and limits
 
 - One scan only; nothing about change over time can be shown yet. The pipeline is built for a second run, which would be processed with the same reference and compared point for point.
