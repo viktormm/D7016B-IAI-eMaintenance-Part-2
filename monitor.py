@@ -1,25 +1,24 @@
-"""Track and overhead line against reference limits and Western Electric rules, plus unsupervised track states:
+"""Track and overhead line against reference limits:
 output/viewer/monitor.html
 
   python monitor.py [run1] [--no-open]
 
-One self-contained page for one run (the real scan by default), with a tab per parameter:
-  gauge                 every 25 cm slab and every 1 m control point, against the FRA gauge limits per class of track
-                        (49 CFR 213.53), the limits behind the "red-tag" defects of Sharma et al. (2018)
+One self-contained page for one run (the real scan by default), with a Gauge tab and a Contact wire tab (height and stagger stacked):
+  gauge                 every 25 cm slab and every 1 m control point, against Trafikverket's maintenance limits per
+                        speed class (TRVINFRA-00013, tables K11.2 and K11.3)
   contact wire height   the wire above the rail-head plane every metre (contact_wire.py), against the TSI Energy values
                         (Regulation (EU) 1301/2014, 4.2.9.1) and Trafikverket's nominal height
   contact wire stagger  its sideways position relative to the track centre, against the TSI maximum lateral deviation
                         per pantograph length (4.2.9.2)
-  track states          k-means on one feature vector per metre (track_features.py): which metres look alike, which
-                        stand out; the number of states and the features used are chosen on the page
-On every parameter tab the Western Electric rules run on the series treated as a control chart along the track, with a
-slider and readout for any chainage and a table of the flagged stretches. All rule and clustering computation happens
+Every tab has the series along the track against the chosen limits, the curve in 3D
+and a table of the flagged stretches. All limit computation happens
 in the page, so the controls react at once; the data are embedded and the page works offline.
 """
 import argparse
 import datetime
 import json
 import os
+import re
 import webbrowser
 
 import numpy as np
@@ -29,9 +28,6 @@ import track_curve as tc
 
 NOMINAL_MM = tc.NOMINAL_GAUGE * 1e3
 INCH = 25.4
-# 49 CFR 213.53(b): the gauge must be at least ... but not more than ...
-FRA_CLASSES = [("Class 4 and 5", "freight up to 60/80 mph", 56.0, 57.5), ("Class 2 and 3", "freight up to 25/40 mph", 56.0, 57.75),
-               ("Class 1", "freight up to 10 mph", 56.0, 58.0), ("Excepted track", "freight up to 10 mph, with restrictions", None, 58.25)]
 # Trafikverket TRVINFRA-00013 v2.0 (2021-10-11), Spårläge. Speed classes of table K7.1; gauge point-fault limits of table K11.2 as
 # (min, max) deviation from 1435 mm per level; 100 m sliding-mean minimums of table K11.3 (UH1min, UH2min; straight track and R > 2500 m).
 TRV_CLASSES = [("H0", "V ≤ 40 km/h"), ("H1", "40 < V ≤ 80 km/h"), ("H2", "80 < V ≤ 120 km/h"), ("H3", "120 < V ≤ 160 km/h"), ("H4", "160 < V ≤ 200 km/h"), ("H5", "200 < V ≤ 250 km/h")]
@@ -79,12 +75,9 @@ def collect(run_id):
                   [{"group": "Trafikverket TRVINFRA-00013, 100 m sliding mean (table K11.3)", "name": f"Trafikverket {c}, {sp}, 100 m mean", "series": "m100",
                     "note": "the sliding mean of the gauge over 100 m, for straight track and curves with R > 2500 m; only minimums are set; choose the 100 m sliding mean as the points of the chart",
                     "levels": [{"name": "UH1min", "min": float(u1), "max": None, "meaning": TRV_LEVELS["UH1"]}, {"name": "UH2min", "min": float(u2), "max": None, "meaning": TRV_LEVELS["UH2"]}]}
-                   for c, sp in TRV_CLASSES if c in TRV_MEAN100 for u1, u2 in [TRV_MEAN100[c]]] +
-                  [{"group": "FRA track safety standard, 49 CFR 213.53", "name": f"FRA {n}, {sp}", "series": None, "note": "a single safety limit per class of track",
-                    "levels": [{"name": "limit", "min": None if lo is None else round(lo * INCH, 1), "max": round(hi * INCH, 1), "meaning": "the safety limit of the United States standard"}]}
-                   for n, sp, lo, hi in FRA_CLASSES],
+                   for c, sp in TRV_CLASSES if c in TRV_MEAN100 for u1, u2 in [TRV_MEAN100[c]]],
         "default_limit": 4,
-        "limits_text": "Trafikverket's requirements for track geometry, TRVINFRA-00013 version 2.0 (2021-10-11), tables K11.2 and K11.3: the deviation of a single gauge reading from 1435 mm, and the 100 m sliding mean, per speed class H0 to H5 and in four levels. PLAN is the planning limit, UH1 and UH2 the two maintenance limits (UH2 is a safety requirement: repair before the next inspection), and KRIT the critical limit where action is immediate. The scan lies on Södra stambanan south-west of Höör (km 566.2 to 566.4, 180 km/h), so class H4 (160 to 200 km/h) is preselected; it can be changed in the menu. The FRA limits of 49 CFR 213.53 are kept for comparison: they are the safety limits behind the \"red-tag\" defects in Sharma et al. (2018), and they are far wider."})
+        "limits_text": "Trafikverket's requirements for track geometry, TRVINFRA-00013 version 2.0 (2021-10-11), tables K11.2 and K11.3: the deviation of a single gauge reading from 1435 mm, and the 100 m sliding mean, per speed class H0 to H5 and in four levels. PLAN is the planning limit, UH1 and UH2 the two maintenance limits (UH2 is a safety requirement: repair before the next inspection), and KRIT the critical limit where action is immediate. The scan lies on Södra stambanan south-west of Höör (km 566.2 to 566.4, 180 km/h), so class H4 (160 to 200 km/h) is preselected; it can be changed in the menu."})
     cw = columns(os.path.join(folder, "contact_wire.csv"))
     if cw:
         D["params"].append({
@@ -111,13 +104,6 @@ def collect(run_id):
         zrail = 0.5 * (cv["z_left"] + cv["z_right"])
         D["wire3d"] = {"s": _list(cv["s"], 2), "dL": _list(cv["d_left"], 3), "dR": _list(cv["d_right"], 3), "zL": _list(cv["z_left"] - zrail, 3), "zR": _list(cv["z_right"] - zrail, 3),
                        "ws": _list(cw["s"][okw], 2), "wd": _list(cw["d_wire_m"][okw], 3), "wh": _list(cw["height_m"][okw], 3)}
-    ft = columns(os.path.join(folder, "features.csv"))
-    if ft:
-        LAB = {"gauge_mm": ("Gauge, from 1435", "mm"), "versine_mm": ("Alignment, 10 m versine", "mm"), "points_per_m": ("Points per metre", ""),
-               "above_ground_mm": ("Rail head above ballast", "mm"), "above_sleeper_mm": ("Rail head above sleeper", "mm"), "head_tilt": ("Rail-head tilt", ""),
-               "sleeper_spacing_m": ("Sleeper spacing", "m"), "wire_height_m": ("Contact wire height", "m"), "wire_stagger_m": ("Contact wire stagger", "m"),
-               "intensity_left": ("Head intensity, left", ""), "intensity_right": ("Head intensity, right", "")}
-        D["features"] = {"s": _list(ft["s"], 1), "cols": [{"key": k, "label": LAB.get(k, (k, ""))[0], "unit": LAB.get(k, (k, ""))[1], "v": _list(ft[k], 4)} for k in ft if k != "s"]}
     return D
 
 
@@ -125,6 +111,10 @@ def render(D):
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "monitor_template.html"), encoding="utf-8") as f:
         page = f.read()
+    # the page holds two copies of the quantity panel (a tab shows one or two quantities); the second copy gets "_2" on every id
+    m = re.search(r"<!--PANEL-->(.*?)<!--/PANEL-->", page, re.S)
+    panel2 = re.sub(r'\b(id|for)="([A-Za-z0-9]+)"', r'\1="\2_2"', m.group(1))
+    page = page[:m.end()] + "\n    " + panel2.replace('id="panel_2"', 'id="panel_2" style="display:none"') + page[m.end():]
     page = page.replace("/*DATA*/null", json.dumps(D, separators=(",", ":"), allow_nan=False), 1)
     return page.replace("/*PLOTLY*/", get_plotlyjs(), 1)
 
@@ -139,7 +129,7 @@ def main():
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(render(D))
-    print(f"monitor written to {path} ({os.path.getsize(path) / 1e6:.1f} MB): " + ", ".join(p["key"] for p in D["params"]) + (", track states" if "features" in D else ""))
+    print(f"monitor written to {path} ({os.path.getsize(path) / 1e6:.1f} MB): " + ", ".join(p["key"] for p in D["params"]))
     if not a.no_open:
         webbrowser.open("file:///" + os.path.abspath(path).replace(os.sep, "/"))
 

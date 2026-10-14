@@ -57,29 +57,22 @@
 <body>
 <header><div class="wrap">
   <h1>Track and overhead line against limits</h1>
-  <div class="lead">One LiDAR scan, one curve of the track. The gauge of the rails and the height and stagger of the contact wire are read along the chainage, compared with reference limits, and watched with Western Electric control-chart rules. A last tab lets the metres sort themselves into states.</div>
+  <div class="lead">One LiDAR scan, one curve of the track. The gauge of the rails and the height and stagger of the contact wire are read along the chainage and compared with reference limits.</div>
   <div class="sub" id="prov"></div>
   <div class="tabs" id="tabs"></div>
   <div class="kpis" id="kpis"></div>
 </div></header>
 <main class="wrap">
   <div id="paramView">
-    <div class="card">
+    <!--PANEL--><div id="panel">
+    <div class="card mt">
       <h3 id="settingsTitle">Settings</h3>
       <p class="hint" id="whatText"></p>
       <div class="controls">
         <div class="ctl"><label for="cls">Reference limits</label><select id="cls"></select></div>
         <div class="ctl"><label for="series">Points of the chart</label><select id="series"></select></div>
-        <div class="ctl"><label for="centre">Centre line</label><select id="centre"><option value="mean">the track's mean</option><option value="nominal">the nominal value</option></select></div>
-        <div class="ctl"><label for="sigma">Sigma</label><select id="sigma"><option value="std">scatter of the points along the track</option><option value="mad">robust scatter (median absolute deviation)</option><option value="noise">point-to-point noise only</option></select></div>
-        <div class="ctl"><label for="minlen">Ignore alarms shorter than</label><select id="minlen"><option value="0">nothing</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="5">5 m</option></select></div>
+        <div class="ctl"><label for="minlen">Ignore stretches shorter than</label><select id="minlen"><option value="0">nothing</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="5">5 m</option></select></div>
         <div class="ctl"><label for="yscale">Vertical scale</label><select id="yscale"><option value="fit">fit the track</option><option value="limits">show both limits</option></select></div>
-        <div class="ctl"><label>Western Electric rules</label><div class="chips" id="rules">
-          <label><input type="checkbox" value="1" checked> 1 · one point beyond 3σ</label>
-          <label><input type="checkbox" value="2" checked> 2 · two of three beyond 2σ, same side</label>
-          <label><input type="checkbox" value="3" checked> 3 · four of five beyond 1σ, same side</label>
-          <label><input type="checkbox" value="4" checked> 4 · eight in a row on one side</label>
-        </div></div>
       </div>
     </div>
     <div class="card mt"><h3 id="chartTitle"></h3><p class="hint" id="chartHint"></p><div id="chart"></div></div>
@@ -88,32 +81,9 @@
       <iframe id="view3dFrame" loading="lazy" title="3D view" style="display:none"></iframe>
       <div id="mini3d" style="display:none"></div>
     </div>
-    <div class="row cols-2 mt">
-      <div class="card"><h3>At the cursor</h3><p class="hint">Drag the slider, or click a point in the chart. The readout shows the value there and whether it is off.</p>
-        <div class="slider"><input type="range" id="pos" min="0" max="0" step="1" value="0"><span id="status" class="badge ok">OK</span></div>
-        <div class="readout" id="readout"></div></div>
-      <div class="card"><h3>Distribution</h3><p class="hint">All points of the chart, with the nominal value and the chosen limits.</p><div id="hist"></div></div>
-    </div>
     <div class="card mt"><h3>Flagged stretches</h3><p class="hint" id="tableHint"></p><div class="scroll" id="stretches"></div></div>
     <div class="card mt notes" id="notes"></div>
-  </div>
-
-  <div id="statesView" style="display:none">
-    <div class="card">
-      <h3>Settings</h3>
-      <p class="hint">Every metre of track gets one feature vector from what the pipeline measured. The metres are grouped into states by k-means (unsupervised: no labels, no assumptions about what a state is), and each metre gets an anomaly score, its distance from the centre of its own state. The states and the score are recomputed here as you change the settings.</p>
-      <div class="controls">
-        <div class="ctl"><label for="k">Number of states</label><select id="k"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
-        <div class="ctl"><label>Features used</label><div class="chips" id="featPick"></div></div>
-      </div>
-    </div>
-    <div class="card mt"><h3>States along the track</h3><p class="hint" id="stateHint"></p><div id="stateBand"></div></div>
-    <div class="card mt"><h3>What each state looks like</h3><p class="hint">Each feature along the track, coloured by state. A state is a combination of feature levels; the table below gives the means.</p><div id="stateFeatures"></div></div>
-    <div class="row cols-2 mt">
-      <div class="card"><h3>State profiles</h3><p class="hint">Mean of every feature per state, in its own unit, and where the state lies along the track.</p><div class="scroll" id="stateTable"></div></div>
-      <div class="card"><h3>Most unusual metres</h3><p class="hint">The metres furthest from the centre of their own state, and the feature that puts them there.</p><div class="scroll" id="anomalyTable"></div></div>
-    </div>
-    <div class="card mt notes" id="stateNotes"></div>
+    </div><!--/PANEL-->
   </div>
 </main>
 
@@ -133,37 +103,52 @@ const WORDS = {gauge: ['tightest', 'widest'], wire_height: ['lowest', 'highest']
 
 el('prov').textContent = `Run ${D.run.id} · ${D.run.file} · ${D.run.points.toLocaleString('en')} points · ${D.run.length_m} m · reference line ${D.run.reference} · pipeline ${D.run.code} · page made ${D.generated}`;
 
-// ---------------------------------------------------------------- tabs
-const TABS = D.params.map(p => ({key: p.key, label: p.short})).concat(D.features ? [{key: 'states', label: 'Track states'}] : []);
-let P = D.params[0];
-const S = {tab: P.key, cls: 0, series: 'm1', centre: 'mean', sigma: 'std', minlen: 1, yscale: 'fit', rules: new Set([1, 2, 3, 4]), pos: 0, k: 3, feats: null};
-el('tabs').innerHTML = TABS.map(t => `<button data-k="${t.key}" class="${t.key === S.tab ? 'on' : ''}">${t.label}</button>`).join('');
+// ---------------------------------------------------------------- tabs and panels
+// A tab shows one or two quantities, each in its own panel (the page holds two copies of the panel markup, the second
+// with every id suffixed "_2"). The rendering functions below work on the globals P, S, cur and SFX, which withPanel()
+// swaps in for the panel being drawn.
+const wireKeys = D.params.filter(p => p.key.startsWith('wire_')).map(p => p.key);
+const TABS = [{key: 'gauge', label: 'Gauge', params: ['gauge']}].filter(t => D.params.some(p => p.key === 'gauge'))
+  .concat(wireKeys.length ? [{key: 'wire', label: 'Contact wire', params: wireKeys}] : []);
+const newState = () => ({cls: 0, series: 'm1', centre: 'mean', sigma: 'std', minlen: 1, yscale: 'fit', rules: new Set(), pos: 0});   // rules: the control-chart rules are kept in the code but switched off and not shown
+const PANELS = [{sfx: '', P: null, S: newState(), cur: null}, {sfx: '_2', P: null, S: newState(), cur: null}];
+let P = D.params[0], S = PANELS[0].S, cur = null, SFX = '', TAB = TABS[0].key;
+const pel = id => el(id + SFX);
+function withPanel(i, fn) {
+  const prev = {SFX, P, S, cur}, pn = PANELS[i];
+  SFX = pn.sfx; P = pn.P; S = pn.S; cur = pn.cur;
+  try { fn(); pn.cur = cur; } finally { SFX = prev.SFX; P = prev.P; S = prev.S; cur = prev.cur; }
+}
+el('tabs').innerHTML = TABS.map(t => `<button data-k="${t.key}" class="${t.key === TAB ? 'on' : ''}">${t.label}</button>`).join('');
 el('tabs').onclick = e => { const b = e.target.closest ? e.target.closest('button') : null; if (!b) return; showTab(b.dataset.k); };
 function showTab(key) {
-  S.tab = key;
+  TAB = key;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.k === key));
-  if (key === 'states') { el('paramView').style.display = 'none'; el('statesView').style.display = ''; states(); return; }
-  el('paramView').style.display = ''; el('statesView').style.display = 'none';
-  P = D.params.find(p => p.key === key);
-  S.cls = P.default_limit || 0; S.pos = 0; S.series = P.base.step < 1 ? 'm1' : 'base';
+  const t = TABS.find(x => x.key === key);
+  PANELS.forEach((pn, i) => {
+    const pkey = t.params[i], node = el('panel' + pn.sfx);
+    if (!pkey) { pn.P = null; pn.cur = null; node.style.display = 'none'; return; }
+    node.style.display = '';
+    pn.P = D.params.find(p => p.key === pkey); pn.S = newState(); pn.S.cls = pn.P.default_limit || 0; pn.S.series = pn.P.base.step < 1 ? 'm1' : 'base';
+    withPanel(i, () => { initPanel(); refresh(); });
+  });
+  renderKpis();
+}
+function initPanel() {                                             // the menus and titles of the panel for its quantity P
   const levelText = c => c.levels.map(l => `${l.name} ${l.min == null ? '' : fmt(l.min, P.decimals)}${l.min != null && l.max != null ? '–' : ''}${l.max == null ? '' : fmt(l.max, P.decimals)}`).join(' · ') + ' ' + P.unit;
   const groups = [...new Set(P.limits.map(c => c.group || ''))];
-  el('cls').innerHTML = groups.map(gname => `<optgroup label="${gname}">` + P.limits.map((c, i) => (c.group || '') === gname ? `<option value="${i}" ${i === S.cls ? 'selected' : ''}>${c.name}: ${levelText(c)}</option>` : '').join('') + '</optgroup>').join('');
+  pel('cls').innerHTML = groups.map(gname => `<optgroup label="${gname}">` + P.limits.map((c, i) => (c.group || '') === gname ? `<option value="${i}" ${i === S.cls ? 'selected' : ''}>${c.name}: ${levelText(c)}</option>` : '').join('') + '</optgroup>').join('');
   const opts = P.base.step < 1 ? [['base', `every ${P.base.name} (raw)`], ['m1', `1 m stretches (mean of ${Math.round(1 / P.base.step)} slabs)`]] : [['base', `every ${P.base.name} (as measured)`]];
   opts.push(['m2', `2 m stretches (mean of ${Math.round(2 / P.base.step)} points)`], ['m5', `5 m stretches (mean of ${Math.round(5 / P.base.step)} points)`]);
   if (P.base.step < 1) opts.push(['m100', '100 m sliding mean, every metre (for the Trafikverket 100 m limits)']);
   if (P.ctrl) opts.push(['ctrl', P.ctrl.name]);
-  el('series').innerHTML = opts.map(o => `<option value="${o[0]}" ${o[0] === S.series ? 'selected' : ''}>${o[1]}</option>`).join('');
-  el('centre').options[0].text = `the track's mean ${P.short.toLowerCase()}`; el('centre').options[1].text = `the nominal value (${fmt(P.nominal, P.decimals)} ${P.unit})`;
-  el('settingsTitle').textContent = `Settings · ${P.label}`; el('whatText').textContent = `${P.label}: ${P.what}.`;
-  el('chartTitle').textContent = `${P.label} along the chainage`;
-  refresh(false);
-  // start the cursor on the most extreme point, so the first look shows something
-  const c = cur; let best = 0, bd = -1; c.g.forEach((v, i) => { if (v != null && Math.abs(v - c.centre) > bd) { bd = Math.abs(v - c.centre); best = i; } }); setPos(best);
+  pel('series').innerHTML = opts.map(o => `<option value="${o[0]}" ${o[0] === S.series ? 'selected' : ''}>${o[1]}</option>`).join('');
+  pel('minlen').value = String(S.minlen); pel('yscale').value = S.yscale;
+  pel('settingsTitle').textContent = `Settings · ${P.label}`; pel('whatText').textContent = `${P.label}: ${P.what}.`;
+  pel('chartTitle').textContent = `${P.label} along the chainage`;
 }
 
-// ---------------------------------------------------------------- the series and the rules
-let cur = null;
+// ---------------------------------------------------------------- the series and the limits
 function pointNoise(base) {                                        // point-to-point noise of the raw series: scatter of neighbouring differences / sqrt(2)
   const d = []; for (let i = 1; i < base.v.length; i++) { const a = base.v[i - 1], b = base.v[i]; if (a != null && b != null) d.push(b - a); }
   if (d.length < 3) return NaN;
@@ -256,20 +241,21 @@ function compute() {
 function levelColours(n) { return n === 1 ? [RED] : n === 2 ? ['#e07a1f', RED] : n === 3 ? ['#f2b35c', '#e07a1f', RED] : ['#f2b35c', '#e07a1f', RED, '#7b1113']; }
 
 // ---------------------------------------------------------------- header numbers
-function kpis() {
-  const c = cur, d = P.decimals, u = P.unit, w = WORDS[P.key] || ['lowest', 'highest'];
-  const K = [
+function kpis(compact) {                                           // returns the tiles' HTML; compact = two quantities share the header
+  const c = cur, d = P.decimals, u = P.unit, w = WORDS[P.key] || ['lowest', 'highest'], q = P.short.toLowerCase();
+  const K = compact ? [
+    {num: `${sign(c.mean - P.nominal, d)}<small>${u}</small>`, lab: `mean ${q}, from the nominal ${fmt(P.nominal, d)} ${u}`, sub: `${fmt(c.mean, d)} ${u} · from ${fmt(c.dmin, d)} to ${fmt(c.dmax, d)} ${u} · ${c.nValid} points`},
+    {num: c.nOutside, lab: `${q}: points beyond ${c.levels.length > 1 ? c.levels[0].name : 'the limits'}`, sub: `${c.lim.name} · ${c.stretches.filter(x => x.kind === 'limit').length} stretches`, cls: c.nOutside ? 'red' : ''},
+    {num: `${Math.round(100 * (c.nValid - c.nOutside) / c.nValid)}<small>%</small>`, lab: `${q}: within ${c.levels.length > 1 ? c.levels[0].name : 'the limits'}`, sub: `${c.nValid - c.nOutside} of ${c.nValid} points`}] : [
     {num: `${sign(c.mean - P.nominal, d)}<small>${u}</small>`, lab: `mean ${P.short.toLowerCase()}, from the nominal ${fmt(P.nominal, d)} ${u}`, sub: `${fmt(c.mean, d)} ${u} · spread ± ${fmt(c.sd, d)} ${u} · ${c.nValid} points`},
     {num: `${fmt(c.dmin, d)}<small>${u}</small>`, lab: `${w[0]} point shown`, sub: c.lo != null ? `${sign(c.dmin - c.lo, d)} ${u} against the ${c.levels[0].name} minimum of ${fmt(c.lo, d)} ${u}` : 'the chosen limits have no minimum'},
     {num: `${fmt(c.dmax, d)}<small>${u}</small>`, lab: `${w[1]} point shown`, sub: c.hi != null ? `${sign(c.hi - c.dmax, d)} ${u} below the ${c.levels[0].name} maximum of ${fmt(c.hi, d)} ${u}` : 'the chosen limits have no maximum'},
     {num: c.nOutside, lab: c.levels.length > 1 ? `points beyond ${c.levels[0].name}` : 'points outside the limits', sub: c.levels.length > 1 ? c.levels.map((lv, j) => `${lv.name} ${c.levelCount[j]}`).join(' · ') + ` · ${c.stretches.filter(x => x.kind === 'limit').length} stretches` : `${c.lim.name} · ${c.stretches.filter(x => x.kind === 'limit').length} stretches`, cls: c.nOutside ? 'red' : ''},
-    {num: c.nHit, lab: 'WECO alarms (selected rules)', sub: `all four rules would give: 1 → ${c.ruleCount[0]}, 2 → ${c.ruleCount[1]}, 3 → ${c.ruleCount[2]}, 4 → ${c.ruleCount[3]} points`, cls: c.nHit ? 'amber' : ''},
-    {num: `${Math.round(100 * c.zoneShare[0] / c.nValid)}<small>%</small>`, lab: 'of points in zone C (within 1σ)', sub: `zone B ${Math.round(100 * c.zoneShare[1] / c.nValid)} % · zone A ${Math.round(100 * c.zoneShare[2] / c.nValid)} % · beyond 3σ ${Math.round(100 * c.zoneShare[3] / c.nValid)} %`}];
-  el('kpis').innerHTML = K.map(k => `<div class="kpi ${k.cls || ''}"><div class="num">${k.num}</div><div class="lab">${k.lab}</div><div class="sub">${k.sub}</div></div>`).join('');
+    {num: `${Math.round(100 * (c.nValid - c.nOutside) / c.nValid)}<small>%</small>`, lab: c.levels.length > 1 ? `of points within ${c.levels[0].name}` : 'of points within the limits', sub: `${c.nValid - c.nOutside} of ${c.nValid} points`}];
+  return K.map(k => `<div class="kpi ${k.cls || ''}"><div class="num">${k.num}</div><div class="lab">${k.lab}</div><div class="sub">${k.sub}</div></div>`).join('');
 }
 
 // ---------------------------------------------------------------- the chart
-let cursorShape = 0;
 function chart() {
   const c = cur, s = c.s, g = c.g, d = P.decimals, u = P.unit;
   const seriesName = S.series === 'base' ? `${P.short.toLowerCase()}, every ${P.base.name}` : S.series === 'ctrl' ? `${P.short.toLowerCase()} at the ${P.ctrl.name}s` : `${P.short.toLowerCase()}, mean per ${S.series.slice(1)} m stretch`;
@@ -281,34 +267,20 @@ function chart() {
     traces.push({type: 'scattergl', mode: 'markers', x: idx.length ? idx.map(i => s[i]) : [null], y: idx.length ? idx.map(i => g[i]) : [null], name: c.levels.length > 1 ? `beyond ${lv.name} (${c.levelCount[j]})` : 'outside the limits',
       marker: {color: LC[j], size: 7 + 2 * j, line: {color: '#fff', width: 1}}, hovertemplate: `%{x:.2f} m: %{y:.${d}f} ${u}, beyond ${lv.name}<extra></extra>`});
   });
-  const RULE_STYLE = [[1, '#b3261e', 9], [2, '#e8a317', 7], [3, '#f0c466', 6], [4, '#c9b27a', 5]];
-  RULE_STYLE.forEach(([r, col, size]) => {
-    const bit = {1: 1, 2: 2, 3: 4, 4: 8}[r], lower = bit - 1, idx = [];
-    c.hit.forEach((h, i) => { if (!c.outside[i] && (h & bit) && !(h & lower)) idx.push(i); });
-    const total = c.hit.filter(h => h & bit).length;
-    traces.push({type: 'scattergl', mode: 'markers', x: idx.length ? idx.map(i => s[i]) : [null], y: idx.length ? idx.map(i => g[i]) : [null], name: `rule ${r} (${total} point${total === 1 ? '' : 's'})`,
-      visible: S.rules.has(r) ? true : 'legendonly', marker: {color: col, size, line: {color: '#fff', width: 1}}, hovertemplate: `%{x:.2f} m: %{y:.${d}f} ${u}, WECO rule ${r}<extra></extra>`});
-  });
   if (P.flags) { const idx = []; c.flagged.forEach((f, i) => { if (f && g[i] != null) idx.push(i); });
     traces.push({type: 'scattergl', mode: 'markers', x: idx.map(i => s[i]), y: idx.map(i => g[i]), name: P.flags.name, marker: {symbol: 'x', color: MUTED, size: 7}, hovertemplate: `%{x:.2f} m: ${P.flags.name}<extra></extra>`}); }
   const shapes = [];
-  const band = (k, col) => shapes.push({type: 'rect', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: c.centre - k * c.sigma, y1: c.centre + k * c.sigma, fillcolor: col, line: {width: 0}, layer: 'below'});
-  band(3, 'rgba(15,139,141,0.05)'); band(2, 'rgba(15,139,141,0.06)'); band(1, 'rgba(15,139,141,0.08)');
-  shapes.push({type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: c.centre, y1: c.centre, line: {color: TEAL, width: 1, dash: 'dot'}});
   shapes.push({type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: P.nominal, y1: P.nominal, line: {color: '#9fb0b5', width: 1, dash: 'dash'}});
   c.levels.forEach((lv, j) => [lv.min, lv.max].forEach(y => { if (y != null) shapes.push({type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: y, y1: y, line: {color: LC[j], width: j === c.levels.length - 1 ? 1.8 : 1.2, dash: c.levels.length > 1 && j < c.levels.length - 1 ? 'dot' : 'solid'}}); }));
   c.stretches.forEach(st => shapes.push({type: 'rect', xref: 'x', x0: st.s0 - c.step / 2, x1: st.s1 + c.step / 2, yref: 'paper', y0: 0, y1: 1,
     fillcolor: st.kind === 'limit' ? 'rgba(198,40,40,0.12)' : 'rgba(232,163,23,0.16)', line: {width: 0}, layer: 'below'}));
-  cursorShape = shapes.length;
-  shapes.push({type: 'line', xref: 'x', x0: s[S.pos], x1: s[S.pos], yref: 'paper', y0: 0, y1: 1, line: {color: INK, width: 1.5}});
   const pad = Math.max(3 * c.sigma, 0.1 * (c.dmax - c.dmin) || 1);
   const allLimits = c.levels.flatMap(lv => [lv.min, lv.max]).filter(v => v != null);
   let ymin, ymax;
   if (S.yscale === 'limits') { ymin = Math.min(c.dmin, P.nominal, ...allLimits) - pad / 3; ymax = Math.max(c.dmax, P.nominal, ...allLimits) + pad / 3; }
   else { ymin = Math.min(c.dmin, P.nominal) - pad; ymax = Math.max(c.dmax, P.nominal) + pad; }
   const ann = [{xref: 'paper', x: 1, xanchor: 'right', yref: 'y', y: P.nominal, yanchor: 'bottom', showarrow: false, text: `nominal ${fmt(P.nominal, d)} ${u}`, font: {size: 11, color: MUTED}},
-               {xref: 'paper', x: 0.005, xanchor: 'left', yref: 'paper', y: 0.01, yanchor: 'bottom', showarrow: false, bgcolor: 'rgba(255,255,255,0.85)', text: `centre line ${fmt(c.centre, d)} ${u} (dotted) · WECO zones C, B, A at 1σ, 2σ, 3σ with σ = ${fmt(c.sigma, d + 1)} ${u} (${S.sigma === 'noise' ? 'point-to-point noise' : 'scatter of the points'})`, font: {size: 11, color: TEAL}}];
-  [[2.5, 'A'], [1.5, 'B'], [0.5, 'C']].forEach(([k, name]) => [1, -1].forEach(sg => { const y = c.centre + sg * k * c.sigma; if (y > ymin && y < ymax) ann.push({xref: 'paper', x: 0.003, xanchor: 'left', yref: 'y', y, yanchor: 'middle', showarrow: false, text: name, font: {size: 10, color: TEAL}}); }));
+               {xref: 'paper', x: 0.005, xanchor: 'left', yref: 'paper', y: 0.01, yanchor: 'bottom', showarrow: false, bgcolor: 'rgba(255,255,255,0.85)', text: `mean ${fmt(c.mean, d)} ${u} · scatter ± ${fmt(c.sd, d + 1)} ${u}`, font: {size: 11, color: TEAL}}];
   const limitNote = (y, text, above, col) => (y >= ymin && y <= ymax)
     ? ann.push({xref: 'paper', x: 1, xanchor: 'right', yref: 'y', y, yanchor: above ? 'bottom' : 'top', showarrow: false, text, font: {size: 10.5, color: col}})
     : null;
@@ -322,37 +294,24 @@ function chart() {
   const layout = {paper_bgcolor: '#fff', plot_bgcolor: '#fff', font: FONT, height: 500, margin: {l: 64, r: 20, t: 16, b: 48}, hovermode: 'closest', shapes, annotations: ann,
     legend: {orientation: 'h', x: 1, xanchor: 'right', y: 1.08, font: {size: 11.5}},
     xaxis: axis({title: title('chainage along the track (m)'), rangeslider: {thickness: 0.06, bgcolor: '#f6f9f9'}}), yaxis: axis({title: title(`${P.label} (${u})`), range: [ymin, ymax]})};
-  Plotly.newPlot('chart', traces, layout, CFG);
-  if (el('chart').on) el('chart').on('plotly_click', e => { const x = e.points[0].x; let best = 0, bd = 1e9; s.forEach((v, i) => { const dd = Math.abs(v - x); if (dd < bd) { bd = dd; best = i; } }); setPos(best); });
-  el('chartHint').textContent = `Teal: ${seriesName}. ${c.levels.length > 1 ? `Limit lines: ${c.lim.name}, from ${c.levels[0].name} (dotted, light) to ${c.levels[c.levels.length - 1].name} (solid, dark)` : `Red lines: the ${c.lim.name} limits`}. Dashed grey: the nominal value. Shaded bands: the WECO zones around the centre line. ` +
-    `Small markers are coloured by the most severe rule that fires there (rule 1 dark red, 2 amber, 3 light amber, 4 pale); larger markers by the most severe limit level a point exceeds; the legend counts both. Amber shading: an alarmed stretch. Red shading: beyond a limit.` + (P.flags ? ` Grey crosses: ${P.flags.name}.` : '') + ` Drag below the chart to zoom; double-click to reset.`;
-}
-
-function hist() {
-  const c = cur, vals = c.g.filter(v => v != null), d = P.decimals;
-  const LC = levelColours(c.levels.length);
-  const shapes = [{type: 'line', xref: 'x', x0: P.nominal, x1: P.nominal, yref: 'paper', y0: 0, y1: 1, line: {color: '#9fb0b5', width: 1, dash: 'dash'}}];
-  c.levels.forEach((lv, j) => [lv.min, lv.max].forEach(x => { if (x != null) shapes.push({type: 'line', xref: 'x', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1, line: {color: LC[j], width: 1.5}}); }));
-  const firstLims = [c.lo, c.hi].filter(v => v != null);
-  const span = Math.max(c.dmax, ...firstLims) - Math.min(c.dmin, ...firstLims) || 1, lo = Math.min(c.dmin, ...firstLims) - 0.05 * span, hi = Math.max(c.dmax, ...firstLims) + 0.05 * span;
-  Plotly.newPlot('hist', [{type: 'histogram', x: vals, nbinsx: 40, marker: {color: TEAL}, hovertemplate: `%{x} ${P.unit}: %{y} points<extra></extra>`}],
-    {paper_bgcolor: '#fff', plot_bgcolor: '#fff', font: FONT, height: 300, margin: {l: 50, r: 16, t: 10, b: 44}, shapes, bargap: 0.05,
-     xaxis: axis({title: title(`${P.label} (${P.unit})`), range: [lo, hi]}), yaxis: axis({title: title('points')})}, CFG);
+  Plotly.newPlot('chart' + SFX, traces, layout, CFG);
+  pel('chartHint').textContent = `Teal: ${seriesName}. ${c.levels.length > 1 ? `Limit lines: ${c.lim.name}, from ${c.levels[0].name} (dotted, light) to ${c.levels[c.levels.length - 1].name} (solid, dark)` : `Red lines: the ${c.lim.name} limits`}. Dashed grey: the nominal value. ` +
+    `Larger markers are coloured by the most severe limit level a point exceeds; the legend counts them. Red shading: a stretch beyond a limit.` + (P.flags ? ` Grey crosses: ${P.flags.name}.` : '') + ` Drag below the chart to zoom; double-click to reset.`;
 }
 
 function view3d() {
-  const frame = el('view3dFrame'), mini = el('mini3d');
+  const card = pel('view3d'), frame = pel('view3dFrame'), mini = pel('mini3d');
   if (P.key === 'gauge' && D.views.run) {
-    frame.src = frame.src || D.views.run; frame.style.display = ''; mini.style.display = 'none';
-    el('view3dTitle').textContent = 'The curve in 3D';
-    el('view3dHint').innerHTML = `The run as a 3D curve of both rails. Set "Colour the rails by" to gauge to see tight and wide stretches on the track itself; tick "Contact wire" under Show to draw the wire along the top of the box (its sideways zigzag is true, its height is the colour); the Window and Cursor use the same chainage as the chart. <a href="${D.views.run}" target="_blank">Open it in its own tab</a>.`;
-  } else if (D.wire3d) {
-    frame.style.display = 'none'; mini.style.display = '';
-    el('view3dTitle').textContent = 'The rails and the contact wire in 3D';
-    el('view3dHint').textContent = 'Track frame: chainage along, sideways across, height up (true metres, the along-track axis compressed). The wire zigzags over the track centre and rides about 5.6 m above the rails. Drag to turn, scroll to zoom.';
+    card.style.display = ''; frame.src = frame.src || D.views.run; frame.style.display = ''; mini.style.display = 'none';
+    pel('view3dTitle').textContent = 'The curve in 3D';
+    pel('view3dHint').innerHTML = `The run as a 3D curve of both rails. Set "Colour the rails by" to gauge to see tight and wide stretches on the track itself; tick "Contact wire" under Show to draw the wire along the top of the box (its sideways zigzag is true, its height is the colour); the Window and Cursor of the viewer use the same chainage as the chart. <a href="${D.views.run}" target="_blank">Open it in its own tab</a>.`;
+  } else if (D.wire3d && SFX === '') {                              // one 3D picture for the wire tab, under the first of its two charts
+    card.style.display = ''; frame.style.display = 'none'; mini.style.display = '';
+    pel('view3dTitle').textContent = 'The rails and the contact wire in 3D';
+    pel('view3dHint').textContent = 'Track frame: chainage along, sideways across, height up (true metres, the along-track axis compressed). The wire zigzags over the track centre and rides about 5.6 m above the rails; its colour is its height. Drag to turn, scroll to zoom.';
     const w = D.wire3d, zero = w.s.map(() => 0);
     const wireColour = P.key === 'wire_stagger' ? w.wd : w.wh;
-    Plotly.newPlot('mini3d', [
+    Plotly.newPlot('mini3d' + SFX, [
       {type: 'scatter3d', mode: 'lines', x: w.s, y: w.dL, z: w.zL, name: 'left rail', line: {color: '#D9822B', width: 4}, hoverinfo: 'skip'},
       {type: 'scatter3d', mode: 'lines', x: w.s, y: w.dR, z: w.zR, name: 'right rail', line: {color: '#028090', width: 4}, hoverinfo: 'skip'},
       {type: 'scatter3d', mode: 'lines', x: w.s, y: zero, z: zero, name: 'track centre', line: {color: '#9fb0b5', width: 2, dash: 'dash'}, hoverinfo: 'skip'},
@@ -361,159 +320,50 @@ function view3d() {
       {paper_bgcolor: '#fff', font: FONT, height: 520, margin: {l: 0, r: 0, t: 10, b: 0}, legend: {orientation: 'h', x: 0, y: 1, font: {size: 11.5}},
        scene: {aspectmode: 'manual', aspectratio: {x: 5, y: 1, z: 1.4}, camera: {eye: {x: -2.6, y: -2.4, z: 0.9}, center: {x: 0, y: 0, z: -0.1}},
                xaxis: {title: 'chainage s (m)', gridcolor: GRID}, yaxis: {title: 'sideways (m)', gridcolor: GRID, range: [-1.5, 1.5]}, zaxis: {title: 'height above rail (m)', gridcolor: GRID}}}, CFG);
-  } else el('view3d').style.display = 'none';
-}
-
-// ---------------------------------------------------------------- the cursor
-function setPos(i, fromSlider) {
-  S.pos = i;
-  if (!fromSlider) el('pos').value = i;
-  const c = cur, s = c.s[i], g = c.g[i], z = c.z[i], d = P.decimals, u = P.unit;
-  const rules = [1, 2, 4, 8].filter(b => c.hit[i] & b).map(b => ({1: 1, 2: 2, 4: 3, 8: 4}[b]));
-  const st = el('status');
-  if (g == null) { st.className = 'badge na'; st.textContent = 'NO MEASUREMENT'; }
-  else if (c.outside[i]) { st.className = 'badge limit'; st.textContent = c.levels.length > 1 ? `BEYOND ${c.levels[c.level[i]].name}` : 'OUTSIDE THE LIMITS'; }
-  else if (rules.length) { st.className = 'badge rule'; st.textContent = 'WECO ALARM · RULE ' + rules.join(' + '); }
-  else { st.className = 'badge ok'; st.textContent = 'OK'; }
-  const marginLo = c.lo == null || g == null ? null : g - c.lo, marginHi = c.hi == null || g == null ? null : c.hi - g, lvName = c.levels.length > 1 ? c.levels[0].name + ' ' : '';
-  const margin = marginLo == null && marginHi == null ? ['–', 'no limit to measure against'] :
-    marginLo == null || (marginHi != null && marginHi < marginLo) ? [sign(marginHi, d) + ' ' + u, `margin to the ${lvName}maximum`] : [sign(marginLo, d) + ' ' + u, `margin to the ${lvName}minimum`];
-  const near = c.stretches.find(x => s >= x.s0 - c.step && s <= x.s1 + c.step);
-  const ro = [[fmt(s, 2) + ' m', 'chainage'], [fmt(g, d) + ' ' + u, `${P.short.toLowerCase()} at this point`], [sign(g == null ? null : g - P.nominal, d) + ' ' + u, `from the nominal ${fmt(P.nominal, d)} ${u}`],
-              [sign(z, 1) + ' σ', 'from the centre line, in sigmas'], margin,
-              [near ? `${fmt(near.s0, 1)}–${fmt(near.s1, 1)} m` : 'none', near ? `inside a ${near.kind === 'limit' ? 'limit' : 'rule'} stretch` : 'no flagged stretch here']];
-  if (P.flags) ro.push([c.flagged[i] ? 'yes' : 'no', P.flags.name]);
-  el('readout').innerHTML = ro.map(r => `<div class="ro"><div class="v">${r[0]}</div><div class="k">${r[1]}</div></div>`).join('');
-  if (el('chart').layout) Plotly.relayout('chart', {[`shapes[${cursorShape}].x0`]: s, [`shapes[${cursorShape}].x1`]: s});
+  } else card.style.display = 'none';
 }
 
 function table() {
   const c = cur, st = c.stretches, d = P.decimals, u = P.unit;
   const LC = levelColours(c.levels.length);
-  el('tableHint').textContent = st.length ? `${st.length} stretches. Red: beyond a level of the ${c.lim.name} limits (the most severe level reached is named). Amber: a WECO alarm, a selected Western Electric rule fires. Click a row to move the cursor there.` :
-    `No point is beyond the ${c.lim.name} limits and no selected rule fires anywhere.`;
-  el('stretches').innerHTML = st.length ? '<table><tr><th class="l">Kind</th><th>From</th><th>To</th><th>Length</th><th>Extreme value</th><th>From nominal</th><th>From centre</th><th class="l">Rules</th></tr>' +
-    st.map(x => `<tr class="pick" data-i="${x.peak_i}"><td class="l"><span class="dot" style="background:${x.kind === 'limit' ? LC[x.level] : AMBER}"></span>${x.kind === 'limit' ? (c.levels.length > 1 ? 'beyond ' + c.levels[x.level].name : 'outside the limits') : 'WECO alarm'}</td>` +
-      `<td>${fmt(x.s0, 1)} m</td><td>${fmt(x.s1, 1)} m</td><td>${fmt(x.s1 - x.s0 + c.step, 1)} m</td><td>${fmt(x.peak, d)} ${u}</td><td>${sign(x.peak - P.nominal, d)} ${u}</td><td>${sign((x.peak - c.centre) / c.sigma, 1)} σ</td><td class="l">${x.rules.join(', ') || '–'}</td></tr>`).join('') + '</table>' : '';
-  el('stretches').onclick = e => { const tr = e.target && e.target.closest ? e.target.closest('tr[data-i]') : null; if (tr) setPos(+tr.dataset.i); };
+  pel('tableHint').textContent = st.length ? `${st.length} stretches of ${P.label.toLowerCase()} beyond a level of the ${c.lim.name} limits; the most severe level reached is named.` :
+    `No point of ${P.label.toLowerCase()} is beyond the ${c.lim.name} limits.`;
+  pel('stretches').innerHTML = st.length ? '<table><tr><th class="l">Kind</th><th>From</th><th>To</th><th>Length</th><th>Extreme value</th><th>From nominal</th><th>From the mean</th></tr>' +
+    st.map(x => `<tr><td class="l"><span class="dot" style="background:${x.kind === 'limit' ? LC[x.level] : AMBER}"></span>${x.kind === 'limit' ? (c.levels.length > 1 ? 'beyond ' + c.levels[x.level].name : 'outside the limits') : 'flagged'}</td>` +
+      `<td>${fmt(x.s0, 1)} m</td><td>${fmt(x.s1, 1)} m</td><td>${fmt(x.s1 - x.s0 + c.step, 1)} m</td><td>${fmt(x.peak, d)} ${u}</td><td>${sign(x.peak - P.nominal, d)} ${u}</td><td>${sign(x.peak - c.mean, d)} ${u}</td></tr>`).join('') + '</table>' : '';
 }
 
 function notes() {
   const c = cur, d = P.decimals, u = P.unit;
-  el('notes').innerHTML = `<h3>How to read this</h3>
+  pel('notes').innerHTML = `<h3>How to read this: ${P.label.toLowerCase()}</h3>
 <p><b>${P.label}</b> is ${P.what}. ${P.key === 'gauge' ? 'Height is not used, so the sensor-relative height of the scan does not matter here.' : 'It is measured against the rails in the same cross-section, so the sensor-relative height of the scan cancels out.'}</p>
 <p><b>The limits</b> are ${P.limits_text}</p>
 <p><b>Selected now: ${c.lim.name}.</b> ${c.lim.note}. ${c.levels.map(lv => `<b>${lv.name}</b>${lv.min != null || lv.max != null ? ` (${lv.min != null ? 'min ' + fmt(lv.min, d) : ''}${lv.min != null && lv.max != null ? ', ' : ''}${lv.max != null ? 'max ' + fmt(lv.max, d) : ''} ${u})` : ''}: ${lv.meaning}`).join('. ')}.${c.lim.series === 'm100' && S.series !== 'm100' ? ' <b>These limits apply to the 100 m sliding mean: choose it as the points of the chart.</b>' : ''}</p>
-<p><b>The Western Electric (WECO) rules</b> treat the series along the track as a control chart with zones <b>C</b> (within 1σ of the centre line), <b>B</b> (1σ–2σ) and <b>A</b> (2σ–3σ). Rule <b>1</b>: one point beyond zone A. Rule <b>2</b>: two of three consecutive points in zone A or beyond, same side. Rule <b>3</b>: four of five in zone B or beyond, same side. Rule <b>4</b>: eight in a row on one side. Each firing is a WECO alarm: this place differs from the rest of this track. It does not mean a limit is broken.</p>
-<p><b>Stretches, not points.</b> A fault is a stretch, so the page can average the points over 1, 2 or 5 m before the rules run (an X-bar chart) and drops alarms shorter than the chosen minimum. On this series the rules fire on: 1 → ${c.ruleCount[0]}, 2 → ${c.ruleCount[1]}, 3 → ${c.ruleCount[2]}, 4 → ${c.ruleCount[3]} points of ${c.nValid}. Against the track's own mean, rules 3 and 4 also fire wherever the value drifts for tens of metres, because a track is not one uniform process. The point-to-point noise of the raw series is ${fmt(pointNoise(P.base), d + 1)} ${u}; a point of this chart ${c.nPer > 1 ? `averages ${c.nPer} of them, so its own noise is about ${fmt(c.noise, d + 1)} ${u}` : 'carries all of it'}. With σ set to that noise, the rules ask whether a place differs from the centre line by more than the measurement can explain.</p>
+<p><b>Stretches, not points.</b> A fault is a stretch, so the page can average the points over 1, 2 or 5 m and drops flagged stretches shorter than the chosen minimum. The point-to-point noise of the raw series is ${fmt(pointNoise(P.base), d + 1)} ${u}; a point of this chart ${c.nPer > 1 ? `averages ${c.nPer} of them, so its own noise is about ${fmt(c.noise, d + 1)} ${u}` : 'carries all of it'}. A single point a little past a limit may therefore be noise; a stretch of many points cannot be.</p>
 <p><b>This run.</b> Mean ${fmt(c.mean, d)} ${u}, scatter ± ${fmt(c.sd, d)} ${u}, from ${fmt(c.dmin, d)} to ${fmt(c.dmax, d)} ${u}. ${c.nOutside ? (c.levels.length > 1 ? `Points beyond each level of ${c.lim.name}: ` + c.levels.map((lv, j) => `${lv.name} ${c.levelCount[j]}`).join(', ') + '.' : `${c.nOutside} points lie outside the ${c.lim.name} limits.`) : `No point lies outside the ${c.lim.name} limits.`} The scan is one pass; between two passes a positioning error would come on top of what is shown here.</p>
 <p class="muted">Data: output/runs/${D.run.id}/. Page made by monitor.py.</p>`;
 }
 
-function refresh(keepPos) {
+function refresh() {                                              // redraw the active panel (P, S, cur, SFX)
   compute();
-  el('pos').max = cur.s.length - 1;
-  if (!keepPos || S.pos >= cur.s.length) S.pos = Math.min(S.pos, cur.s.length - 1);
-  kpis(); chart(); hist(); view3d(); table(); notes(); setPos(S.pos);
+  chart(); view3d(); table(); notes();
 }
-el('cls').onchange = e => { S.cls = +e.target.value; const want = P.limits[S.cls].series; if (want && S.series !== want) { S.series = want; el('series').value = want; S.pos = 0; refresh(false); } else refresh(true); };
-el('series').onchange = e => { S.series = e.target.value; S.pos = 0; refresh(false); };
-el('centre').onchange = e => { S.centre = e.target.value; refresh(true); };
-el('sigma').onchange = e => { S.sigma = e.target.value; refresh(true); };
-el('minlen').onchange = e => { S.minlen = +e.target.value; refresh(true); };
-el('yscale').onchange = e => { S.yscale = e.target.value; refresh(true); };
-el('rules').onchange = () => { S.rules = new Set([...document.querySelectorAll('#rules input:checked')].map(x => +x.value)); refresh(true); };
-el('pos').oninput = e => setPos(+e.target.value, true);
+function renderKpis() {                                           // the header tiles of every panel on the tab
+  const active = PANELS.map((pn, i) => pn.P ? i : -1).filter(i => i >= 0);
+  el('kpis').innerHTML = active.map(i => { let html = ''; withPanel(i, () => { html = kpis(active.length > 1); }); return html; }).join('');
+}
+PANELS.forEach((pn, i) => {                                       // the menus of each panel act on that panel only
+  const E = id => el(id + pn.sfx), change = fn => e => withPanel(i, () => { fn(e); refresh(); renderKpis(); });
+  E('cls').onchange = change(e => { S.cls = +e.target.value; const want = P.limits[S.cls].series; if (want && S.series !== want) { S.series = want; E('series').value = want; } });
+  E('series').onchange = change(e => { S.series = e.target.value; });
+  E('minlen').onchange = change(e => { S.minlen = +e.target.value; });
+  E('yscale').onchange = change(e => { S.yscale = e.target.value; });
+});
 
-// ---------------------------------------------------------------- track states: k-means on the per-metre features
-function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-function kmeans(X, k, seed) {
-  const n = X.length, m = X[0].length, rnd = mulberry32(seed), dist2 = (a, b) => a.reduce((s, v, j) => s + (v - b[j]) ** 2, 0);
-  const centres = [X[Math.floor(rnd() * n)].slice()];
-  while (centres.length < k) {                                     // k-means++ seeding
-    const d = X.map(x => Math.min(...centres.map(c => dist2(x, c)))), tot = d.reduce((a, b) => a + b, 0);
-    let r = rnd() * tot, i = 0; while (r > d[i] && i < n - 1) { r -= d[i]; i++; }
-    centres.push(X[i].slice());
-  }
-  let labels = new Array(n).fill(0);
-  for (let it = 0; it < 60; it++) {
-    const newLabels = X.map(x => { let b = 0, bd = Infinity; centres.forEach((c, j) => { const dd = dist2(x, c); if (dd < bd) { bd = dd; b = j; } }); return b; });
-    if (newLabels.every((l, i) => l === labels[i]) && it > 0) break;
-    labels = newLabels;
-    for (let j = 0; j < k; j++) { const idx = labels.map((l, i) => l === j ? i : -1).filter(i => i >= 0); if (!idx.length) continue; for (let f = 0; f < m; f++) centres[j][f] = idx.reduce((s, i) => s + X[i][f], 0) / idx.length; }
-  }
-  const inertia = X.reduce((s, x, i) => s + dist2(x, centres[labels[i]]), 0);
-  return {labels, centres, inertia};
-}
-function states() {
-  const F = D.features;
-  if (!S.feats) S.feats = new Set(F.cols.map(c => c.key));
-  if (!el('featPick').innerHTML) {
-    el('featPick').innerHTML = F.cols.map(c => `<label><input type="checkbox" value="${c.key}" checked> ${c.label}</label>`).join('');
-    el('featPick').onchange = () => { S.feats = new Set([...document.querySelectorAll('#featPick input:checked')].map(x => x.value)); states(); };
-    el('k').onchange = e => { S.k = +e.target.value; states(); };
-  }
-  const cols = F.cols.filter(c => S.feats.has(c.key));
-  if (cols.length < 2) { el('stateHint').textContent = 'Choose at least two features.'; return; }
-  const n = F.s.length, rows = [];
-  for (let i = 0; i < n; i++) if (cols.every(c => c.v[i] != null)) rows.push(i);
-  // standardise each feature over the complete metres
-  const stats = cols.map(c => { const v = rows.map(i => c.v[i]); const mean = v.reduce((a, b) => a + b, 0) / v.length; const sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length) || 1; return {mean, sd}; });
-  const X = rows.map(i => cols.map((c, j) => (c.v[i] - stats[j].mean) / stats[j].sd));
-  let best = null;
-  for (let seed = 1; seed <= 12; seed++) { const r = kmeans(X, S.k, seed); if (!best || r.inertia < best.inertia) best = r; }
-  // name the states in the order they first appear along the track
-  const order = []; best.labels.forEach(l => { if (!order.includes(l)) order.push(l); });
-  const rename = {}; order.forEach((l, j) => rename[l] = j);
-  const label = new Array(n).fill(null); rows.forEach((i, r) => label[i] = rename[best.labels[r]]);
-  const centres = order.map(l => best.centres[l]);
-  const score = new Array(n).fill(null), worst = new Array(n).fill(null);
-  rows.forEach((i, r) => { const c = centres[label[i]], dz = X[r].map((v, j) => v - c[j]); score[i] = Math.sqrt(dz.reduce((s, v) => s + v * v, 0) / cols.length); const j = dz.map(Math.abs).indexOf(Math.max(...dz.map(Math.abs))); worst[i] = `${cols[j].label} ${dz[j] > 0 ? 'high' : 'low'} (${sign(dz[j], 1)} σ)`; });
-  const K = S.k;
-  // header numbers for this tab
-  const sizes = Array.from({length: K}, (_, j) => label.filter(l => l === j).length);
-  el('kpis').innerHTML = [{num: rows.length, lab: 'metres with every feature', sub: `${cols.length} features used`}]
-    .concat(sizes.map((sz, j) => ({num: `${sz}<small>m</small>`, lab: `<span class="dot" style="background:${STATE_COLOURS[j]}"></span>state ${j + 1}`, sub: `${Math.round(100 * sz / rows.length)} % of the measured metres`})))
-    .concat([{num: score.filter(v => v != null && v > 2).length, lab: 'unusual metres (score above 2σ)', sub: 'far from the centre of their own state', cls: 'amber'}])
-    .map(k => `<div class="kpi ${k.cls || ''}"><div class="num">${k.num}</div><div class="lab">${k.lab}</div><div class="sub">${k.sub}</div></div>`).join('');
-  // band along the track + anomaly score
-  const bandTraces = Array.from({length: K}, (_, j) => ({type: 'bar', x: F.s.filter((_, i) => label[i] === j), y: F.s.filter((_, i) => label[i] === j).map(() => 1), width: 1, name: `state ${j + 1}`, marker: {color: STATE_COLOURS[j]}, hovertemplate: `%{x:.1f} m: state ${j + 1}<extra></extra>`, yaxis: 'y'}));
-  bandTraces.push({type: 'scattergl', mode: 'lines', x: F.s, y: score, name: 'anomaly score (σ)', line: {color: INK, width: 1.4}, yaxis: 'y2', hovertemplate: '%{x:.1f} m: %{y:.2f} σ<extra></extra>', connectgaps: false});
-  bandTraces.push({type: 'scattergl', mode: 'markers', x: F.s.filter((_, i) => score[i] != null && score[i] > 2), y: score.filter(v => v != null && v > 2), name: 'unusual (> 2σ)', marker: {color: RED, size: 7}, yaxis: 'y2', hovertemplate: '%{x:.1f} m: %{y:.2f} σ<extra></extra>'});
-  const bl = {paper_bgcolor: '#fff', plot_bgcolor: '#fff', font: FONT, height: 300, margin: {l: 56, r: 20, t: 16, b: 44}, hovermode: 'closest', barmode: 'overlay', bargap: 0, legend: {orientation: 'h', x: 0, y: 1.14, font: {size: 11.5}},
-    xaxis: axis({title: title('chainage along the track (m)'), anchor: 'y2'}), yaxis: axis({domain: [0.78, 1], showticklabels: false, showgrid: false, zeroline: false, fixedrange: true, title: title('state')}),
-    yaxis2: axis({domain: [0, 0.7], title: title('anomaly score (σ from own state)'), rangemode: 'tozero'})};
-  Plotly.newPlot('stateBand', bandTraces, bl, CFG);
-  el('stateHint').textContent = `Top: the state of every metre. Bottom: how far each metre is from the centre of its own state, in standard deviations across the ${cols.length} features; above 2 counts as unusual. States are numbered in the order they first appear along the track.`;
-  // small multiples: each feature coloured by state
-  const m = cols.length, gap = 0.035, h = (1 - gap * (m - 1)) / m, traces = [], layout = {paper_bgcolor: '#fff', plot_bgcolor: '#fff', font: FONT, height: 95 * m + 70, showlegend: false, hovermode: 'closest', margin: {l: 64, r: 20, t: 28, b: 44}, annotations: []};
-  cols.forEach((c, f) => {
-    const yref = 'y' + (f ? f + 1 : ''), yname = 'yaxis' + (f ? f + 1 : ''), top = 1 - f * (h + gap);
-    layout[yname] = axis({domain: [top - h, top], title: title(c.unit), anchor: 'x', tickfont: {size: 10, color: MUTED}});
-    for (let j = 0; j < K; j++) { const idx = rows.filter(i => label[i] === j); traces.push({type: 'scattergl', mode: 'markers', x: idx.map(i => F.s[i]), y: idx.map(i => c.v[i]), yaxis: yref, marker: {color: STATE_COLOURS[j], size: 4}, hovertemplate: `%{x:.1f} m: %{y} ${c.unit}<extra>${c.label}, state ${j + 1}</extra>`}); }
-    layout.annotations.push({xref: 'paper', yref: 'paper', x: 0, y: top, xanchor: 'left', yanchor: 'bottom', showarrow: false, text: `<b>${c.label}</b>`, font: {size: 11.5, color: INK}});
-  });
-  layout.xaxis = axis({title: title('chainage along the track (m)'), anchor: 'y' + (m > 1 ? m : '')});
-  Plotly.newPlot('stateFeatures', traces, layout, CFG);
-  // profiles table: feature means per state, and the stretches of each state
-  const ranges = j => { const out = []; let open = null; F.s.forEach((s, i) => { if (label[i] === j) { if (open && s - open.to <= 1.01) open.to = s; else { if (open) out.push(open); open = {from: s, to: s}; } } }); if (open) out.push(open); return out.filter(r => r.to - r.from >= 2).map(r => `${Math.round(r.from)}–${Math.round(r.to)} m`).join(', ') || 'scattered metres'; };
-  el('stateTable').innerHTML = '<table><tr><th class="l">Feature</th>' + Array.from({length: K}, (_, j) => `<th><span class="dot" style="background:${STATE_COLOURS[j]}"></span>state ${j + 1}</th>`).join('') + '<th>all</th></tr>' +
-    cols.map((c, f) => `<tr><td class="l">${c.label}${c.unit ? ` (${c.unit})` : ''}</td>` + Array.from({length: K}, (_, j) => { const idx = rows.filter(i => label[i] === j); const mean = idx.reduce((s, i) => s + c.v[i], 0) / idx.length; return `<td>${fmt(mean, c.unit === 'mm' || c.unit === '' && Math.abs(stats[f].mean) > 100 ? 1 : 3)}</td>`; }).join('') + `<td>${fmt(stats[f].mean, c.unit === 'mm' || c.unit === '' && Math.abs(stats[f].mean) > 100 ? 1 : 3)}</td></tr>`).join('') +
-    `<tr><td class="l">metres</td>` + sizes.map(sz => `<td>${sz}</td>`).join('') + `<td>${rows.length}</td></tr>` +
-    `<tr><td class="l">where</td>` + Array.from({length: K}, (_, j) => `<td style="white-space:normal;text-align:left;font-size:11.5px">${ranges(j)}</td>`).join('') + '<td></td></tr></table>';
-  const top = rows.slice().sort((a, b) => score[b] - score[a]).slice(0, 12);
-  el('anomalyTable').innerHTML = '<table><tr><th>Chainage</th><th>Score</th><th class="l">State</th><th class="l">What stands out</th></tr>' +
-    top.map(i => `<tr><td>${fmt(F.s[i], 1)} m</td><td>${fmt(score[i], 2)} σ</td><td class="l"><span class="dot" style="background:${STATE_COLOURS[label[i]]}"></span>${label[i] + 1}</td><td class="l">${worst[i]}</td></tr>`).join('') + '</table>';
-  el('stateNotes').innerHTML = `<h3>How to read this</h3>
-<p><b>The features</b> are one value per metre from what the pipeline measured: ${F.cols.map(c => c.label.toLowerCase()).join(', ')}. Each is standardised (mean 0, scatter 1) so that millimetres, metres and intensity counts weigh the same.</p>
-<p><b>k-means</b> splits the metres into the chosen number of states so that metres within a state are as alike as possible. It knows nothing about tracks: a state is simply a combination of feature levels that occurs together along this track. The profiles table says what the combination is, and the "where" row says whether a state is a contiguous stretch (a different kind of track, a different installation) or scattered metres. The result depends on the features chosen and on the number of states; try a few.</p>
-<p><b>The anomaly score</b> is a metre's distance from the centre of its own state, in standard deviations across the features. A high score means that metre does not fit even the state it was put in; the table names the feature responsible. This is the unsupervised counterpart of the control-chart rules on the other tabs: there, a value is judged against the track's mean; here, a metre is judged against metres like it.</p>
-<p class="muted">Features from output/runs/${D.run.id}/features.csv (track_features.py). Clustering runs in the page with fixed seeds, so it gives the same result every time.</p>`;
-}
-
-// a tab can be addressed directly: monitor.html#wire_height, #wire_stagger, #states
-const want = typeof location !== 'undefined' && location.hash ? location.hash.slice(1) : '';
-showTab(TABS.some(t => t.key === want) ? want : S.tab);
+// a tab can be addressed directly: monitor.html#wire (also #wire_height and #wire_stagger)
+const ALIAS = {wire_height: 'wire', wire_stagger: 'wire'};
+const want0 = typeof location !== 'undefined' && location.hash ? location.hash.slice(1) : '', want = ALIAS[want0] || want0;
+showTab(TABS.some(t => t.key === want) ? want : TAB);
 </script>
 </body>
 </html>
