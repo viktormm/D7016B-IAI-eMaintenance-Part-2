@@ -56,8 +56,8 @@
 </head>
 <body>
 <header><div class="wrap">
-  <h1>Track and overhead line against limits</h1>
-  <div class="lead">One LiDAR scan, one curve of the track. The gauge of the rails and the height and stagger of the contact wire are read along the chainage and compared with reference limits.</div>
+  <h1>Track gauge against limits</h1>
+  <div class="lead">One LiDAR scan, one curve of the track. The gauge of the rails is read along the chainage and compared with Trafikverket's maintenance limits.</div>
   <div class="sub" id="prov"></div>
   <div class="tabs" id="tabs"></div>
   <div class="kpis" id="kpis"></div>
@@ -79,7 +79,6 @@
     <div class="card mt" id="view3d">
       <h3 id="view3dTitle">The curve in 3D</h3><p class="hint" id="view3dHint"></p>
       <iframe id="view3dFrame" loading="lazy" title="3D view" style="display:none"></iframe>
-      <div id="mini3d" style="display:none"></div>
     </div>
     <div class="card mt"><h3>Flagged stretches</h3><p class="hint" id="tableHint"></p><div class="scroll" id="stretches"></div></div>
     <div class="card mt notes" id="notes"></div>
@@ -99,7 +98,7 @@ const fmt = (v, n) => v == null || !isFinite(v) ? '–' : (+v).toFixed(n);
 const sign = (v, n) => v == null || !isFinite(v) ? '–' : (v > 0 ? '+' : '') + (+v).toFixed(n);
 const axis = extra => Object.assign({gridcolor: GRID, zerolinecolor: '#d8e0e2', linecolor: '#d8e0e2', tickfont: {size: 11, color: MUTED}, ticks: ''}, extra || {});
 const title = text => ({text, font: {size: 11.5, color: MUTED}});
-const WORDS = {gauge: ['tightest', 'widest'], wire_height: ['lowest', 'highest'], wire_stagger: ['furthest right (−)', 'furthest left (+)']};
+const WORDS = {gauge: ['tightest', 'widest']};
 
 el('prov').textContent = `Run ${D.run.id} · ${D.run.file} · ${D.run.points.toLocaleString('en')} points · ${D.run.length_m} m · reference line ${D.run.reference} · pipeline ${D.run.code} · page made ${D.generated}`;
 
@@ -107,9 +106,7 @@ el('prov').textContent = `Run ${D.run.id} · ${D.run.file} · ${D.run.points.toL
 // A tab shows one or two quantities, each in its own panel (the page holds two copies of the panel markup, the second
 // with every id suffixed "_2"). The rendering functions below work on the globals P, S, cur and SFX, which withPanel()
 // swaps in for the panel being drawn.
-const wireKeys = D.params.filter(p => p.key.startsWith('wire_')).map(p => p.key);
-const TABS = [{key: 'gauge', label: 'Gauge', params: ['gauge']}].filter(t => D.params.some(p => p.key === 'gauge'))
-  .concat(wireKeys.length ? [{key: 'wire', label: 'Contact wire', params: wireKeys}] : []);
+const TABS = [{key: 'gauge', label: 'Gauge', params: ['gauge']}].filter(t => D.params.some(p => p.key === 'gauge'));
 const newState = () => ({cls: 0, series: 'm1', centre: 'mean', sigma: 'std', minlen: 1, yscale: 'fit', rules: new Set(), pos: 0});   // rules: the control-chart rules are kept in the code but switched off and not shown
 const PANELS = [{sfx: '', P: null, S: newState(), cur: null}, {sfx: '_2', P: null, S: newState(), cur: null}];
 let P = D.params[0], S = PANELS[0].S, cur = null, SFX = '', TAB = TABS[0].key;
@@ -231,7 +228,7 @@ function compute() {
     st.level = st.kind === 'limit' ? Math.max(...idx.map(i => level[i])) : -1;
   });
   stretches.sort((a, b) => a.s0 - b.s0);
-  // flags of the measurement itself (e.g. two wires side by side), mapped onto the points of the chart
+  // flags of the measurement itself (a quantity may mark metres where its reading is doubtful), mapped onto the points of the chart
   const flagged = new Array(g.length).fill(false);
   if (P.flags) P.flags.s.forEach(fs => { let best = 0, bd = 1e9; s.forEach((v, i) => { const d = Math.abs(v - fs); if (d < bd) { bd = d; best = i; } }); if (bd <= step / 2 + 1e-9) flagged[best] = true; });
   cur = {s, g, z, hit, hitAll, ruleCount, zoneShare, outside, level, levels, levelCount, stretches, flagged, centre, sigma, mean, sd, mad, noise, nPer, lo, hi, lim, step,
@@ -300,26 +297,11 @@ function chart() {
 }
 
 function view3d() {
-  const card = pel('view3d'), frame = pel('view3dFrame'), mini = pel('mini3d');
+  const card = pel('view3d'), frame = pel('view3dFrame');
   if (P.key === 'gauge' && D.views.run) {
-    card.style.display = ''; frame.src = frame.src || D.views.run; frame.style.display = ''; mini.style.display = 'none';
+    card.style.display = ''; frame.src = frame.src || D.views.run; frame.style.display = '';
     pel('view3dTitle').textContent = 'The curve in 3D';
-    pel('view3dHint').innerHTML = `The run as a 3D curve of both rails. Set "Colour the rails by" to gauge to see tight and wide stretches on the track itself; tick "Contact wire" under Show to draw the wire along the top of the box (its sideways zigzag is true, its height is the colour); the Window and Cursor of the viewer use the same chainage as the chart. <a href="${D.views.run}" target="_blank">Open it in its own tab</a>.`;
-  } else if (D.wire3d && SFX === '') {                              // one 3D picture for the wire tab, under the first of its two charts
-    card.style.display = ''; frame.style.display = 'none'; mini.style.display = '';
-    pel('view3dTitle').textContent = 'The rails and the contact wire in 3D';
-    pel('view3dHint').textContent = 'Track frame: chainage along, sideways across, height up (true metres, the along-track axis compressed). The wire zigzags over the track centre and rides about 5.6 m above the rails; its colour is its height. Drag to turn, scroll to zoom.';
-    const w = D.wire3d, zero = w.s.map(() => 0);
-    const wireColour = P.key === 'wire_stagger' ? w.wd : w.wh;
-    Plotly.newPlot('mini3d' + SFX, [
-      {type: 'scatter3d', mode: 'lines', x: w.s, y: w.dL, z: w.zL, name: 'left rail', line: {color: '#D9822B', width: 4}, hoverinfo: 'skip'},
-      {type: 'scatter3d', mode: 'lines', x: w.s, y: w.dR, z: w.zR, name: 'right rail', line: {color: '#028090', width: 4}, hoverinfo: 'skip'},
-      {type: 'scatter3d', mode: 'lines', x: w.s, y: zero, z: zero, name: 'track centre', line: {color: '#9fb0b5', width: 2, dash: 'dash'}, hoverinfo: 'skip'},
-      {type: 'scatter3d', mode: 'lines+markers', x: w.ws, y: w.wd, z: w.wh, name: 'contact wire', marker: {size: 2.5, color: wireColour, colorscale: 'Viridis', colorbar: {title: {text: P.key === 'wire_stagger' ? 'sideways (m)' : 'height (m)', font: {size: 11}}, thickness: 10, len: 0.6}},
-       line: {color: '#333', width: 3}, hovertemplate: 's %{x:.1f} m · sideways %{y:.3f} m · height %{z:.3f} m<extra>contact wire</extra>'}],
-      {paper_bgcolor: '#fff', font: FONT, height: 520, margin: {l: 0, r: 0, t: 10, b: 0}, legend: {orientation: 'h', x: 0, y: 1, font: {size: 11.5}},
-       scene: {aspectmode: 'manual', aspectratio: {x: 5, y: 1, z: 1.4}, camera: {eye: {x: -2.6, y: -2.4, z: 0.9}, center: {x: 0, y: 0, z: -0.1}},
-               xaxis: {title: 'chainage s (m)', gridcolor: GRID}, yaxis: {title: 'sideways (m)', gridcolor: GRID, range: [-1.5, 1.5]}, zaxis: {title: 'height above rail (m)', gridcolor: GRID}}}, CFG);
+    pel('view3dHint').innerHTML = `The run as a 3D curve of both rails. Set "Colour the rails by" to gauge to see tight and wide stretches on the track itself; the Window and Cursor of the viewer use the same chainage as the chart. <a href="${D.views.run}" target="_blank">Open it in its own tab</a>.`;
   } else card.style.display = 'none';
 }
 
@@ -360,9 +342,8 @@ PANELS.forEach((pn, i) => {                                       // the menus o
   E('yscale').onchange = change(e => { S.yscale = e.target.value; });
 });
 
-// a tab can be addressed directly: monitor.html#wire (also #wire_height and #wire_stagger)
-const ALIAS = {wire_height: 'wire', wire_stagger: 'wire'};
-const want0 = typeof location !== 'undefined' && location.hash ? location.hash.slice(1) : '', want = ALIAS[want0] || want0;
+// a tab can be addressed directly: monitor.html#gauge
+const want = typeof location !== 'undefined' && location.hash ? location.hash.slice(1) : '';
 showTab(TABS.some(t => t.key === want) ? want : TAB);
 </script>
 </body>

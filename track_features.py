@@ -11,7 +11,6 @@ Per 1 m control point of the run (output/runs/<run>/features.csv):
   sleeper_spacing_m  spacing of the sleepers around this metre                            (sleepers.csv, if present)
   points_per_m       LiDAR points within 2.5 m of the track in this metre: point density (slabs.csv)
   intensity_left/right  median LiDAR intensity of the points on each rail head in this metre (the point cloud)
-  wire_height_m, wire_stagger_m  the contact wire above the rail and its stagger          (contact_wire.csv, if present)
 The clustering itself runs in the page (monitor.py), where the number of states can be changed.
 """
 import argparse
@@ -74,11 +73,6 @@ def main():
         ss = np.sort(np.atleast_1d(sp["s"]))
         mids, gaps = 0.5 * (ss[1:] + ss[:-1]), np.diff(ss)
         F["sleeper_spacing_m"] = np.array([np.mean(gaps[(mids >= c - 0.5) & (mids < c + 0.5)]) if ((mids >= c - 0.5) & (mids < c + 0.5)).any() else np.nan for c in s])
-    cw = columns(os.path.join(folder, "contact_wire.csv"))
-    if cw:
-        F["wire_height_m"] = np.interp(s, cw["s"], cw["height_m"], left=np.nan, right=np.nan) if np.isfinite(cw["height_m"]).all() else \
-            np.array([cw["height_m"][np.argmin(np.abs(cw["s"] - c))] if np.min(np.abs(cw["s"] - c)) < 0.01 else np.nan for c in s])
-        F["wire_stagger_m"] = np.array([cw["stagger_m"][np.argmin(np.abs(cw["s"] - c))] if np.min(np.abs(cw["s"] - c)) < 0.01 else np.nan for c in s])
     # rail-head intensity per metre and rail, from the point cloud
     pts_path = a.laz or run["meta"]["input"]["file"]
     import laspy

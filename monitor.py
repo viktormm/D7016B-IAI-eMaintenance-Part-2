@@ -1,16 +1,12 @@
-"""Track and overhead line against reference limits:
+"""Track gauge against reference limits:
 output/viewer/monitor.html
 
   python monitor.py [run1] [--no-open]
 
-One self-contained page for one run (the real scan by default), with a Gauge tab and a Contact wire tab (height and stagger stacked):
+One self-contained page for one run (the real scan by default):
   gauge                 every 25 cm slab and every 1 m control point, against Trafikverket's maintenance limits per
                         speed class (TRVINFRA-00013, tables K11.2 and K11.3)
-  contact wire height   the wire above the rail-head plane every metre (contact_wire.py), against the TSI Energy values
-                        (Regulation (EU) 1301/2014, 4.2.9.1) and Trafikverket's nominal height
-  contact wire stagger  its sideways position relative to the track centre, against the TSI maximum lateral deviation
-                        per pantograph length (4.2.9.2)
-Every tab has the series along the track against the chosen limits, the curve in 3D
+The page has the series along the track against the chosen limits, the curve in 3D
 and a table of the flagged stretches. All limit computation happens
 in the page, so the controls react at once; the data are embedded and the page works offline.
 """
@@ -78,32 +74,6 @@ def collect(run_id):
                    for c, sp in TRV_CLASSES if c in TRV_MEAN100 for u1, u2 in [TRV_MEAN100[c]]],
         "default_limit": 4,
         "limits_text": "Trafikverket's requirements for track geometry, TRVINFRA-00013 version 2.0 (2021-10-11), tables K11.2 and K11.3: the deviation of a single gauge reading from 1435 mm, and the 100 m sliding mean, per speed class H0 to H5 and in four levels. PLAN is the planning limit, UH1 and UH2 the two maintenance limits (UH2 is a safety requirement: repair before the next inspection), and KRIT the critical limit where action is immediate. The scan lies on Södra stambanan south-west of Höör (km 566.2 to 566.4, 180 km/h), so class H4 (160 to 200 km/h) is preselected; it can be changed in the menu."})
-    cw = columns(os.path.join(folder, "contact_wire.csv"))
-    if cw:
-        D["params"].append({
-            "key": "wire_height", "label": "Contact wire height above the rail", "short": "Wire height", "unit": "m", "decimals": 3, "nominal": 5.5,
-            "what": "the height of the overhead contact wire above the plane of the two rail heads, measured every metre from the points of the lowest wire above the track (contact_wire.py); the pantograph must find the wire within a height window",
-            "base": {"name": "1 m", "step": 1.0, "s": _list(cw["s"], 2), "v": _list(cw["height_m"], 4)},
-            "flags": {"name": "two wires side by side (overlap) or a fitting", "s": _list(cw["s"][cw["double"] > 0], 2)},
-            "limits": [{"group": "TSI Energy, Regulation (EU) 1301/2014", "name": "TSI Energy, nominal range", "note": "4.2.9.1: nominal height 5.00 to 5.75 m", "levels": [{"name": "nominal range", "min": 5.00, "max": 5.75, "meaning": "outside the nominal range of the TSI"}]},
-                       {"group": "TSI Energy, Regulation (EU) 1301/2014", "name": "TSI Energy, maximum", "note": "4.2.9.1: at most 6.50 m with tolerances and uplift (6.20 m design); the minimum follows EN 50119 and is not set here", "levels": [{"name": "maximum", "min": None, "max": 6.50, "meaning": "above the TSI maximum"}]},
-                       {"group": "Trafikverket", "name": "Trafikverket, nominal 5.50 m", "note": "Swedish nominal contact wire height 5.50 m; 5.65 m as the maximum of TRVINFRA-00153 is quoted from a search result and must be confirmed", "levels": [{"name": "maximum", "min": None, "max": 5.65, "meaning": "above the Swedish maximum (to be confirmed)"}]}],
-            "default_limit": 0,
-            "limits_text": "the height values of the European TSI for the energy subsystem (Regulation (EU) 1301/2014, point 4.2.9.1): a nominal height between 5.00 and 5.75 m and at most 6.50 m with tolerances and pantograph uplift. The Swedish nominal height is 5.50 m; the Swedish maximum is to be confirmed with the supervisor."})
-        D["params"].append({
-            "key": "wire_stagger", "label": "Contact wire stagger", "short": "Wire stagger", "unit": "m", "decimals": 3, "nominal": 0.0,
-            "what": "the sideways position of the contact wire relative to the track centreline (positive to the left): the zigzag that spreads the wear over the pantograph strip; too far out and the wire leaves the strip",
-            "base": {"name": "1 m", "step": 1.0, "s": _list(cw["s"], 2), "v": _list(cw["stagger_m"], 4)},
-            "flags": {"name": "two wires side by side (overlap) or a fitting", "s": _list(cw["s"][cw["double"] > 0], 2)},
-            "limits": [{"group": "TSI Energy, Regulation (EU) 1301/2014", "name": "TSI Energy, 1600 mm pantograph", "note": "table 4.2.9.2: at most 0.40 m from the track centre under cross wind", "levels": [{"name": "maximum", "min": -0.40, "max": 0.40, "meaning": "further from the centre than a 1600 mm head allows"}]},
-                       {"group": "TSI Energy, Regulation (EU) 1301/2014", "name": "TSI Energy, 1950 mm pantograph", "note": "table 4.2.9.2: at most 0.55 m from the track centre under cross wind", "levels": [{"name": "maximum", "min": -0.55, "max": 0.55, "meaning": "further from the centre than a 1950 mm head allows"}]}],
-            "default_limit": 0,
-            "limits_text": "the maximum lateral deviation of the contact wire from the track centre in the European TSI for the energy subsystem (Regulation (EU) 1301/2014, table 4.2.9.2): 0.40 m for a 1600 mm pantograph head and 0.55 m for a 1950 mm head, under cross wind. The scan shows the wire at rest, so the wind allowance is on top. The value for Swedish 1800 mm heads is to be confirmed."})
-        # a small 3D picture: the rails and the wire in the track frame, every metre
-        okw = np.isfinite(cw["height_m"])
-        zrail = 0.5 * (cv["z_left"] + cv["z_right"])
-        D["wire3d"] = {"s": _list(cv["s"], 2), "dL": _list(cv["d_left"], 3), "dR": _list(cv["d_right"], 3), "zL": _list(cv["z_left"] - zrail, 3), "zR": _list(cv["z_right"] - zrail, 3),
-                       "ws": _list(cw["s"][okw], 2), "wd": _list(cw["d_wire_m"][okw], 3), "wh": _list(cw["height_m"][okw], 3)}
     return D
 
 

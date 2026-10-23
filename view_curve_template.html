@@ -73,7 +73,6 @@
     <label class="inline"><input type="checkbox" id="links"> Cross-links every 5 m</label>
     <label class="inline" id="cloudLabel"><input type="checkbox" id="cloud"> Point cloud sample</label>
     <label class="inline" id="sleepersLabel"><input type="checkbox" id="sleepers"> Sleepers found</label>
-    <label class="inline" id="wireLabel"><input type="checkbox" id="wire"> Contact wire (drawn at the top of the box; its sideways zigzag is true, its height is the colour)</label>
 
     <h2>Colour the rails by</h2>
     <select id="colour"></select>
@@ -138,18 +137,17 @@ const EXTRA = {                                   // colour modes from curve_att
 };
 const HAS_EXTRA = D.runs.some(r => r.dense.tiltL);
 const HAS_SLEEPERS = D.runs.some(r => r.sleepers);
-const HAS_WIRE = D.runs.some(r => r.wire);
 const MANY = D.runs.length > 4;                   // more runs than colours: one run at a time against the first
 const S = {frame: 'track', colour: MANY ? 'change' : D.runs.length > 1 ? 'run' : 'gauge', ey: 1, ez: 1, cam: 'persp',
            lo: D.ranges.s[0], hi: D.ranges.s[1], cursor: Math.round((D.ranges.s[0] + D.ranges.s[1]) / 2),
-           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0, sleepers: 0, wire: 0,
+           rails: 1, ctrl: 1, centre: 1, links: 1, cloud: 0, sleepers: 0,
            step: MANY ? 1 : 0, t: D.runs.length - 1, mag: 100};       // mag: the sideways change is drawn this many times too large
 const H = {};                                     // settings from the address, e.g. #frame=world&lo=140&hi=170
 (location.hash || '').slice(1).split('&').forEach(kv => {
   const [k, v] = kv.split('=');
   if (k in S && v !== undefined) H[k] = typeof S[k] === 'number' ? +v : decodeURIComponent(v);
 });
-['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers', 'wire', 'step', 't', 'mag'].forEach(k => { if (k in H) S[k] = H[k]; });
+['frame', 'colour', 'cam', 'cursor', 'rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers', 'step', 't', 'mag'].forEach(k => { if (k in H) S[k] = H[k]; });
 if (!D.points) S.cloud = 0;
 
 // ---- helpers -------------------------------------------------------------------------------------------------------
@@ -288,23 +286,10 @@ function sleeperTrace(r) {    // a mark across the track at every sleeper found 
   return {type: 'scatter3d', mode: 'lines', name: r.id + ' sleepers (' + p.s.length + ')', legendgroup: r.id + '-sleepers', x, y, z,
     line: {color: '#8a7a66', width: 3}, hoverinfo: 'skip'};
 }
-function wireTrace(r) {       // the contact wire (contact_wire.py): 5.5 m above the rails in reality, which the height stretch cannot show,
-  const w = r.wire, x = [], y = [], z = [], h = [], c = [];       // so it is drawn at the top of the box with its true sideways zigzag and its height as colour
-  const ztop = R('z')[1], world = S.frame === 'world';
-  w.s.forEach((s, i) => {
-    if (!inWin(s) || w.d[i] == null || w.h[i] == null) return;
-    x.push(world ? w.E[i] : s); y.push(world ? w.N[i] : w.d[i]); z.push(ztop); h.push(w.h[i]); c.push([s, w.h[i], w.stagger[i]]);
-  });
-  return {type: 'scatter3d', mode: 'lines+markers', name: 'contact wire (height by colour)', legendgroup: 'wire', x, y, z,
-    line: {color: '#333333', width: 3}, marker: {size: 2.5, color: h, colorscale: 'Viridis', cmin: 5.4, cmax: 6.1, showscale: true,
-    colorbar: {title: {text: 'wire height<br>above rail (m)'}, len: 0.3, thickness: 10, x: 0.99, y: 0.85}},
-    customdata: c, hovertemplate: 's %{customdata[0]:.1f} m<br>height above rail %{customdata[1]:.3f} m<br>stagger %{customdata[2]:+.3f} m<extra>contact wire</extra>'};
-}
 function buildTraces() {
   const T = [];
   if (S.cloud && D.points) T.push(cloudTrace());
   if (S.sleepers) shown().filter(r => r.sleepers).slice(0, 1).forEach(r => T.push(sleeperTrace(r)));
-  if (S.wire) shown().filter(r => r.wire).slice(0, 1).forEach(r => T.push(wireTrace(r)));
   shown().forEach((r, ri) => {
     if (S.links) T.push(linkTrace(r));
     if (S.rails) { T.push(railTrace(r, ri, 'L')); T.push(railTrace(r, ri, 'R')); }
@@ -417,7 +402,7 @@ function syncUI() {
   el('ey').disabled = S.frame === 'world';
   el('eyLabel').style.opacity = S.frame === 'world' ? 0.45 : 1;
   el('lo').value = +S.lo.toFixed(1); el('hi').value = +S.hi.toFixed(1);
-  ['rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers', 'wire'].forEach(k => { el(k).checked = !!S[k]; });
+  ['rails', 'ctrl', 'centre', 'links', 'cloud', 'sleepers'].forEach(k => { el(k).checked = !!S[k]; });
   el('colour').value = S.colour;
   syncRuns();
 }
@@ -439,7 +424,6 @@ function init() {
   else if (S.colour === 'change') S.colour = 'run';
   if (HAS_EXTRA) Object.entries(EXTRA).forEach(([k, e]) => opts.push([k, e.label]));
   if (!HAS_SLEEPERS) { el('sleepers').disabled = true; el('sleepersLabel').style.opacity = 0.45; S.sleepers = 0; }
-  if (!HAS_WIRE) { el('wire').disabled = true; el('wireLabel').style.opacity = 0.45; S.wire = 0; }
   el('colour').innerHTML = opts.map(o => '<option value="' + o[0] + '">' + o[1] + '</option>').join('');
   if (!D.points) { el('cloud').disabled = true; el('cloudLabel').style.opacity = 0.45; }
   const c = el('cursor'); c.min = D.ranges.s[0]; c.max = D.ranges.s[1];
@@ -450,7 +434,7 @@ function init() {
     S.cam = b.dataset.v; syncUI(); Plotly.relayout(plotDiv, {'scene.camera': CAMS[S.cam]}); });
   el('ey').oninput = e => { S.ey = Math.pow(10, +e.target.value / 50); syncUI(); reaspect(); };
   el('ez').oninput = e => { S.ez = Math.pow(10, +e.target.value / 25); syncUI(); reaspect(); };
-  ['rails', 'ctrl', 'centre', 'links', 'sleepers', 'wire'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
+  ['rails', 'ctrl', 'centre', 'links', 'sleepers'].forEach(k => el(k).onchange = e => { S[k] = e.target.checked ? 1 : 0; fullRender(); });
   el('cloud').onchange = e => { keepShape(() => { S.cloud = e.target.checked ? 1 : 0; }); syncUI(); fullRender(); };
   el('colour').onchange = e => { S.colour = e.target.value; if (S.colour === 'change') S.step = 1; syncUI(); fullRender(); updateCursor(false); };
   el('cursor').oninput = e => { S.cursor = +e.target.value; updateCursor(); };

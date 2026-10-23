@@ -82,10 +82,6 @@ def load_attributes(folder, s):
     if os.path.exists(path):
         t = np.genfromtxt(path, delimiter=",", names=True)
         out["sleepers"] = np.atleast_1d(t["s"])
-    path = os.path.join(folder, "contact_wire_dense.csv")        # the contact wire as a curve (contact_wire.py), every 0.1 m
-    if os.path.exists(path):
-        t = np.genfromtxt(path, delimiter=",", names=True)
-        out["wire"] = {k: np.asarray(t[c], float) for k, c in (("s", "s"), ("height", "height_m"), ("stagger", "stagger_m"), ("E", "E"), ("N", "N"))}
     return out
 
 
@@ -195,12 +191,6 @@ def build_data(run_ids, n_points, laz):
             ER, NR = ref.to_world(ss, np.full(len(ss), -0.85))
             r["sleepers"] = {"s": _list(ss, 2), "z": _list(z, 4), "EL": _list(EL - origin[0], 3), "NL": _list(NL - origin[1], 3),
                              "ER": _list(ER - origin[0], 3), "NR": _list(NR - origin[1], 3)}
-    for r, (_, _, d) in zip(runs, loaded):                   # the contact wire: sideways position in the track frame, height above the rail by colour
-        if "wire" in d:
-            w = d["wire"]
-            _, dw = ref.project(w["E"], w["N"])
-            r["wire"] = {"s": _list(w["s"], 2), "d": _list(dw, 3), "h": _list(w["height"], 3), "stagger": _list(w["stagger"], 3),
-                         "E": _list(w["E"] - origin[0], 3), "N": _list(w["N"] - origin[1], 3)}
     sleeper_h = np.concatenate([d[k] for _, _, d in loaded for k in ("sleeper_left", "sleeper_right") if k in d] or [np.array([np.nan])])
     extra_ranges = {"sleeper": [round(float(np.nanmedian(sleeper_h) - 20), 1), round(float(np.nanmedian(sleeper_h) + 20), 1)]} if np.isfinite(sleeper_h).any() else {}
     s_all = np.concatenate([d["s"] for _, _, d in loaded])

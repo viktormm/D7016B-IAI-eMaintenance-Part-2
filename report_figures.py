@@ -1,11 +1,10 @@
-"""Figures for the report, from the outputs of run1: output/figures/r1..r4.png (column width, 300 dpi).
+"""Figures for the report, from the outputs of run1: output/figures/r1..r3.png (column width, 300 dpi).
 
   python report_figures.py [run1]
 
   r1_gauge_limits.png   gauge per 1 m stretch along the track against Trafikverket's point-fault levels (class H4, the line's class)
   r2_gauge_100m.png     the 100 m sliding mean against the UH1 minimum of each speed class
-  r3_contact_wire.png   contact wire height above the rail and stagger, against the TSI values
-  r4_states.png         the track states from k-means on the per-metre features, with three of the features
+  r3_states.png         the track states from k-means on the per-metre features, with four of the features
 Also prints the numbers the report quotes.
 """
 import os
@@ -114,33 +113,7 @@ for cls in ("H2", "H3", "H4", "H5"):
     L = mon.TRV_POINT[cls]
     print(f"point faults {cls}: 1 m stretches beyond PLAN {int((g1 < nom + L['PLAN'][0]).sum())}, UH1 {int((g1 < nom + L['UH1'][0]).sum())}, UH2 {int((g1 < nom + L['UH2'][0]).sum())}, KRIT {int((g1 < nom + L['KRIT'][0]).sum())} of {int(ok.sum())}")
 
-# ---- r3: contact wire
-cw = columns(os.path.join(FOLDER, "contact_wire.csv"))
-fig, axes = plt.subplots(2, 1, figsize=(W, 3.2), sharex=True)
-okw = np.isfinite(cw["height_m"])
-dbl = okw & (cw["double"] > 0)
-ax = axes[0]
-ax.axhspan(5.00, 5.75, color=TEAL, alpha=0.07, lw=0); ax.axhline(5.75, color=RED, lw=0.9, ls="--"); ax.axhline(5.00, color=RED, lw=0.9, ls="--")
-ax.plot(cw["s"][okw], cw["height_m"][okw], color=DARK, lw=1.0, label="contact wire height")
-ax.plot(cw["s"][dbl], cw["height_m"][dbl], "x", color=GREY, ms=3.5, mew=0.8, label="two wires side by side")
-ax.text(2, 5.76, "TSI nominal range 5.00–5.75 m", color=RED, fontsize=6.5, va="bottom")
-ax.set_ylabel("height above rail (m)"); ax.set_ylim(5.4, 6.15); ax.legend(loc="upper left", frameon=False)
-ax = axes[1]
-ax.axhspan(-0.4, 0.4, color=TEAL, alpha=0.07, lw=0)
-for y in (0.4, -0.4):
-    ax.axhline(y, color=RED, lw=0.9, ls="--")
-for y in (0.55, -0.55):
-    ax.axhline(y, color="#7b1113", lw=0.9, ls=":")
-ax.axhline(0, color=GREY, lw=0.8)
-ax.plot(cw["s"][okw], cw["stagger_m"][okw], color=DARK, lw=1.0, label="stagger (+ left)")
-ax.plot(cw["s"][dbl], cw["stagger_m"][dbl], "x", color=GREY, ms=3.5, mew=0.8)
-ax.text(2, 0.41, "TSI ±0.40 m (1600 mm head), ±0.55 m (1950 mm head)", color=RED, fontsize=6.5, va="bottom")
-ax.set_ylabel("stagger (m)"); ax.set_xlabel("chainage along the track (m)"); ax.set_ylim(-0.75, 0.8)
-fig.tight_layout(); fig.savefig(os.path.join(OUT, "r3_contact_wire.png"), dpi=300); plt.close(fig)
-print(f"wire: {int(okw.sum())} of {len(okw)} m, height {np.nanmin(cw['height_m']):.2f}-{np.nanmax(cw['height_m']):.2f} m (median {np.nanmedian(cw['height_m']):.2f}), "
-      f"stagger {np.nanmin(cw['stagger_m']):+.2f}..{np.nanmax(cw['stagger_m']):+.2f}, above 5.75: {int((cw['height_m'] > 5.75).sum())} m, |stagger|>0.40: {int((np.abs(cw['stagger_m']) > 0.40).sum())} m, >0.55: {int((np.abs(cw['stagger_m']) > 0.55).sum())} m, double: {int(dbl.sum())} m")
-
-# ---- r4: track states (k-means, k = 3, all features, standardised, k-means++ with fixed seeds)
+# ---- r3: track states (k-means, k = 3, all features, standardised, k-means++ with fixed seeds)
 ft = columns(os.path.join(FOLDER, "features.csv"))
 keys = [k for k in ft if k != "s"]
 X = np.column_stack([ft[k] for k in keys])
@@ -173,8 +146,8 @@ for l in lab:
         order.append(l)
 lab = np.array([order.index(l) for l in lab])
 state = np.full(len(ft["s"]), -1); state[rows] = lab
-LAB = {"gauge_mm": "gauge\n(mm from 1435)", "intensity_left": "head intensity\n(left rail)", "wire_height_m": "wire height\n(m)", "above_ground_mm": "head above\nballast (mm)"}
-show = ["gauge_mm", "above_ground_mm", "intensity_left", "wire_height_m"]
+LAB = {"gauge_mm": "gauge\n(mm from 1435)", "intensity_left": "head intensity\n(left rail)", "above_sleeper_mm": "head above\nsleeper (mm)", "above_ground_mm": "head above\nballast (mm)"}
+show = ["gauge_mm", "above_ground_mm", "intensity_left", "above_sleeper_mm"]
 fig, axes = plt.subplots(len(show) + 1, 1, figsize=(W, 3.6), sharex=True, gridspec_kw={"height_ratios": [0.35] + [1] * len(show)})
 ax = axes[0]
 for j in range(3):
@@ -187,7 +160,10 @@ for ax, key in zip(axes[1:], show):
         ax.plot(ft["s"][m], ft[key][m], ".", color=STATE_COLOURS[j], ms=2.5)
     ax.set_ylabel(LAB[key], fontsize=6.5)
 axes[-1].set_xlabel("chainage along the track (m)")
-fig.tight_layout(h_pad=0.4); fig.savefig(os.path.join(OUT, "r4_states.png"), dpi=300); plt.close(fig)
+fig.tight_layout(h_pad=0.4); fig.savefig(os.path.join(OUT, "r3_states.png"), dpi=300); plt.close(fig)
+# anomaly score: a metre's distance from the centre of its own state, in standard deviations across the features
+dist = np.sqrt(((Z - centres[best[0]]) ** 2).sum(1) / Z.shape[1])
+print(f"anomaly score (distance from own state centre, sigma across {Z.shape[1]} features): max {dist.max():.2f}, metres above 2: {int((dist > 2).sum())}")
 
 
 def ranges(j):
@@ -206,6 +182,6 @@ def ranges(j):
 
 
 print("states (k=3):", {f"state {j + 1}": {"metres": int((state == j).sum()), "stretches": ranges(j)} for j in range(3)})
-for key in ("gauge_mm", "intensity_left", "wire_height_m", "above_ground_mm", "sleeper_spacing_m"):
+for key in ("gauge_mm", "intensity_left", "above_sleeper_mm", "above_ground_mm", "sleeper_spacing_m", "points_per_m"):
     print("  ", key, "mean per state:", [round(float(np.nanmean(ft[key][state == j])), 2) for j in range(3)])
-print("written:", ", ".join(f"r{i}" for i in range(1, 5)), "to", OUT)
+print("written: r1, r2, r3 to", OUT)
